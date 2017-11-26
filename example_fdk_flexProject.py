@@ -17,7 +17,7 @@ dark = flexData.read_raw(path, 'di')
 flat = flexData.read_raw(path, 'io')    
 proj = flexData.read_raw(path, 'scan_')
 
-geometry, p, l = flexData.read_log(path, 'flexray')   
+meta = flexData.read_log(path, 'flexray')   
  
 #%% Prepro:
     
@@ -32,6 +32,6 @@ flexUtil.display_slice(proj)
 
 vol = numpy.zeros([50, 2000, 2000], dtype = 'float32')
 
-flexProject.FDK(proj, vol, geometry)
+flexProject.FDK(proj, vol, meta['geometry'])
 
 flexUtil.display_slice(vol)

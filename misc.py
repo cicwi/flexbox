@@ -9,9 +9,47 @@ Just some useful stuff...
 """
 
 import time
+import numpy
 
 # Use global time variable to measure time needed to compute stuff:        
 glob_time = 0
+
+def anyslice(array, index, dim):
+    """
+    Slice an array along an arbitrary dimension.
+    """
+    sl = [slice(None)] * array.ndim
+    sl[axis] = index
+      
+    return array[sl]  
+
+def cast2type(array, dtype, bounds = None):
+    """
+    Cast from float to int or float to float rescaling values if needed.
+    """
+    # No? Yes? OK...
+    if array.dtype == dtype:
+        return array
+    
+    # Make sue dtype is not a string:
+    dtype = numpy.dtype(dtype)
+    
+    # If cast to float, simply cast:
+    if dtype.kind == 'f':
+        return numpy.array(array, dtype)
+    
+    # If to integer, rescale:
+    if bounds is None:
+        bounds = [numpy.amin(array), numpy.amax(array)]
+    
+    data_max = numpy.iinfo(dtype).max
+                          
+    array -= bounds[0]
+    array *= data_max / (bounds[1] - bounds[0])
+    
+    array = numpy.array(array, dtype)    
+    
+    return array
 
 def progress_bar(progress):
     """

@@ -12,6 +12,43 @@ This module uses NIST data (embedded in xraylib module) to simulate x-ray spectr
 import numpy
 import xraylib
 
+# Some useful physical constants:
+phys_const = {'c': 299792458, 'h':6.62606896e-34, 'h_ev':4.13566733e-15, 'h_bar':1.054571628e-34,'h_bar_ev': 6.58211899e-16, 
+                  'e':1.602176565e-19, 'Na':6.02214179e23, 're': 2.817940289458e-15,'me':9.10938215e-31, 'me_ev':0.510998910e6}
+const_unit = {'c': 'm/c', 'h':'J*S', 'h_ev':'e*Vs', 'h_bar':'J*s', 'h_bar_ev':'eV*s' , 'e':'colomb', 'Na':'1/mol', 're':'m','me':'kg', 'me_ev':'ev/c**2'}
+
+def material_refraction(compound, rho, Z, energy):
+    """    
+    Calculate complex refrative index of the material taking
+    into account it's density. 
+    
+    Args:
+        compound (str): compound formula
+        rho (float): density in g / cm3
+        Z: avarage atomic number
+        energy (numpy.array): energy in KeV   
+        
+    Returns:
+        float: refraction index in [1/cm]
+    """
+    
+    # Electron density of the material:    
+    Na = phys_const['Na']
+    
+    rho_e = rho * Z * Na
+    
+    # Attenuation:
+    mu = rho * mass_attenuation(energy, compound)
+    
+    # Phase:
+    wavelength = 2 * numpy.pi * (phys_const['h_bar_ev'] * phys_const['c']) / energy    
+                                
+    # TODO: check this against phantoms.m:                            
+    phi = rho_e * phys_const['re'] * wavelength
+    
+    # Refraction index (per cm)
+    return rho * (mu/2 - 1j * phi)
+                       
 def mass_attenuation(energy, compound):
     '''
     Total X-ray absorption for a given compound in cm2g. Energy is given in KeV
@@ -124,4 +161,128 @@ def parse_compound(compund):
     Parse chemical formula
     '''
     return xraylib.CompoundParser(compund)
+
+def calibrate_spectrum(projections, volume, energy = numpy.linspace(10,100, 9), compound = 'Al', density = 2.7, force_threshold = None, iterations = 100000):
+    '''
+    Use the projection stack of a homogeneous object to estimate system's 
+    effective spectrum.
+    Can be used by process.equivalent_thickness to produce an equivalent 
+    thickness projection stack.
+    Please, use conventional geometry. 
+    ''' 
     
+    sz = projections.data.shape
+    
+    trim_proj = projections.copy()
+    trim_vol = volume.copy()
+    
+    # Get 100 central slices:
+    window = 1   
+    trim_proj.data.total = trim_proj.data.total[(sz[0]//2-window):(sz[0]//2+window), :, :]  
+                                                
+    sz = trim_vol.data.shape
+    trim_vol.data.total = trim_vol.data.total[(sz[0]//2-window):(sz[0]//2+window), :, :]        
+    
+    trim_vol.display.slice()                                          
+                                   
+    # Find the shape of the object:                                                    
+    #trim_vol.process.threshold(threshold = force_threshold)    
+    # This way might not work because of mishandling of parents...                      
+    if force_threshold:
+        trim_vol.data.total = numpy.array(trim_vol.data.total > force_threshold, 'float32')
+    else:
+        trim_vol.data.total = numpy.array(trim_vol.data.total > (trim_vol.data.total.max()/2), 'float32')
+    
+    trim_vol.display.slice()  
+    
+    synth_proj = trim_proj.copy()
+    synth_proj.data.zeros()
+    
+    # Forward project the shape:                  
+    print('Calculating the attenuation length.')    
+    recon = reconstruction.reconstruct(synth_proj, trim_vol)
+    recon.forwardproject()                                        
+            
+    # Projected length and intensity (only central slices):
+    length = synth_proj.data.total[window//2:-window//2,:,:]
+    intensity = trim_proj.data.total[window//2:-window//2,:,:]
+
+    length = length.ravel()
+    intensity = intensity.ravel()
+    
+    print('Maximum reprojected length:', length.max())
+    print('Minimum reprojected length:', length.min())
+    
+    print('Number of intensity-length pairs:', length.size)
+    
+    print('Computing the intensity-length transfer function.')
+    
+    intensity = numpy.exp(-intensity)
+    
+    # Bin length (with half a pixel bin size):
+    #max_len = length.max()    
+    #bin_n = numpy.int(max_len * 2)
+    bin_n = 1000
+    
+    bins = numpy.linspace(0.2, length.max() * 0.9, bin_n)
+    idx  = numpy.digitize(length, bins)
+
+    # Rebin length and intensity:        
+    length_0 = bins - (bins[1]-bins[0]) / 2
+    intensity_0 = [numpy.median(intensity[idx==k]) for k in range(bin_n)]
+
+    intensity_0 = numpy.array(intensity_0)
+    length_0 = numpy.array(length_0)
+    
+    # Get rid of nans and more than 1 values:
+    length_0 = length_0[intensity_0 < 1]
+    intensity_0 = intensity_0[intensity_0 < 1]
+    
+    # Enforce zero-one values:
+    length_0 = numpy.insert(length_0, 0, 0)
+    intensity_0 = numpy.insert(intensity_0, 0, 1)
+    
+    print('Intensity-length curve rebinned.')
+    
+    # Display:
+    plt.figure()
+    plt.scatter(length[::100], intensity[::100], color='k', alpha=.2, s=2)
+    plt.plot(length_0, intensity_0, 'r--', lw=4, alpha=.8)
+    plt.axis('tight')
+    plt.title('Intensity v.s. absorption length.')
+    plt.show() 
+    
+    print('Computing the spectrum by Expectation Maximization.')
+    
+    print('Number of length bins:', intensity_0.size)
+    print('Number of energy bins:', energy.size)
+    
+    nb_iter = iterations
+    mu = spectra.linear_attenuation(energy, compound, density, thickness = 0.1)
+    exp_matrix = numpy.exp(-numpy.outer(length_0, mu))
+
+    spec = numpy.ones_like(energy)
+    
+    norm_sum = exp_matrix.sum(0)
+    
+    for iter in range(nb_iter): 
+        spec = spec * exp_matrix.T.dot(intensity_0 / exp_matrix.dot(spec)) / norm_sum
+
+        # Make sure that the total count of spec is 1
+        spec = spec / spec.sum()
+
+    print('Spectrum computed.')
+         
+    plt.figure()
+    plt.plot(energy, spec) 
+    plt.title('Calculated spectrum.')
+        
+    i_synthetic = exp_matrix.dot(spec)
+    
+    # Synthetic spread of Al:
+    plt.figure()
+    plt.plot(length_0, intensity_0) 
+    plt.plot(length_0, i_synthetic) 
+    plt.legend(['Measured intensity','Synthetic intensity'])
+    
+    return energy, spec, length_0, intensity_0

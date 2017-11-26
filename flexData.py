@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Wed Nov 2017
 @author: kostenko
+Created on Wed Nov 2017
 
 This module will contain read / write routines to convert FlexRay scanner data into ASTRA compatible data
+
+We can now read/write:
+    image files (tiff stacks)
+    log files from Flex ray
+    toml geometry files
 """
 
 ''' * Imports * '''
 
-from libtiff import TIFF # libtiff is used for io - it can read write 32/16 -bit tiffs!
+import toml
+import imageio
 import numpy
 import os
 import re
@@ -40,10 +46,10 @@ def read_flexray(self, path):
     
     proj = read_raw(path, 'scan_')
     
-    geom, phys, lyric = read_log(path, 'flexray')
+    geom, phys, lyric = read_log(path, 'flexray')   
     
     return proj, flat, dark, geom, phys, lyric
-  
+        
 def read_raw(path, name, skip = 1, sample = 1, x_roi = [], y_roi = [], dtype = 'float32', disk_map = False):
     """
     Read tiff files stack and return numpy array.
@@ -93,7 +99,41 @@ def read_raw(path, name, skip = 1, sample = 1, x_roi = [], y_roi = [], dtype = '
     print('%u files were loaded.' % file_n)
 
     return data    
-   
+
+def write_raw(path, name, data, dim = 1, dtype = None):
+    """
+    Write tiff stack.
+    
+    Args:
+        path (str): destination path
+        name (str): first part of the files name
+        data (numpy.array): data to write
+        dim (int): dimension along which array is separated into images
+        dtype (type): forse this data type       
+    """
+    # Make path if does not exist:
+    if not os.path.exists(path):
+        os.makedirs(path)
+    
+    # Write files stack:    
+    file_num = data.shape[dim]
+    
+    for ii in range(file_num):
+        
+        path_name = os.path.join(path, name + '_%06u.tiff'%ii)
+        
+        # Extract one slice from the big array
+        img = misc.anyslice(data, ii, dim)
+          
+        # Cast data to another type if needed
+        if dtype is not None:
+            img = misc.cast2type(img, dtype)
+        
+        # Write it!!!
+        imageio.imwrite(path_name, img)
+        
+        misc.progress_bar((ii+1) / file_num)
+        
 def read_log(path, name, log_type = 'flexray'):
     """
     Read the log file and return dictionaries with parameters of the scan.
@@ -105,42 +145,70 @@ def read_log(path, name, log_type = 'flexray'):
         
     Returns:    
         geometry : src2obj, det2obj, det_pixel, thetas, det_hrz, det_vrt, det_mag, det_rot, src_hrz, src_vrt, src_mag, axs_hrz, vol_hrz, vol_vrt, vol_mag, vol_rot
-        physics : physical parameters - voltage, current, exposure
-        lyrics : lyrical description of the data
+        settings : physical settings - voltage, current, exposure
+        description : lyrical description of the data
     """
     
-    if log_type != 'flexray': raise ValueError('Non-flexray log files are not supported yet. Call the support team.')
+    if log_type != 'flexray': raise ValueError('Non-flexray log files are not supported yet. File a complaint form to the support team.')
     
     # Get dictionary to translate keywords:
-    geom_keywords, phys_keywords, lyr_keywords = _get_flexray_keywords_()
+    dictionary = _get_flexray_keywords_()
     
     # Read recods from the file:
-    geometry, physics, lyrics = _parse_keywords_(path, 'settings.txt', geom_keywords, phys_keywords, lyr_keywords, separator = ':')
-                
+    geometry, settings, description = _parse_keywords_(path, 'settings.txt', dictionary, separator = ':')
+    
     # Apply flexray specific corrections and restructure records:
-    _correct_flex_(geometry)   
+    geometry = _correct_flex_(geometry) 
     
-    return geometry, physics, lyrics
+    # Format the geometry record:
+    geometry = _format_geometry_(geometry)    
+        
+    # Create a meta record:
+    meta = {'geometry':geometry, 'settings':settings, 'description':description}    
     
-def astra_projections(array):
+    return meta
+
+def write_meta(file_path, meta):
+    """
+    Read
+    
+    Args:
+        
+    Returns:    
+    """
+    # Save TOML to a file:
+    with open(file_path, 'w') as f:
+        toml.dump(meta, f)
+    
+def read_meta(file_path):
+    """
+    Args:
+        
+    Returns:
+    """  
+    # Read string from a file:
+    #with open(file_path, 'r') as myfile:
+    #    string = myfile.read()#.replace('\n', '')
+    
+    # Parse TOML string:
+    return toml.load(file_path)
+    
+    # TODO SIRT
+    
+def raw2astra(array):
     """
     Convert a given numpy array (sorted: index, hor, vert) to ASTRA-compatible projections stack
     """    
     return numpy.ascontiguousarray(numpy.transpose(array, [1,0,2]))
-    
-def astra_geometry(geometry, data_shape, index_first = None, index_last = None):
-    """
-    Convert the geometry dictionary to projection 
-    
-    """
-    
-def get_vol_geom(vol_shape, geometry, slice_first = None, slice_last = None):
+        
+def astra_vol_geom(geometry, vol_shape, slice_first = None, slice_last = None):
     '''
     Initialize volume geometry.        
-    '''
+    '''    
     # Shape and size (mm) of the volume
     vol_shape = numpy.array(vol_shape)
-    size = vol_shape * geometry['img_pixel']
+    mag = (geometry['det2obj'] + geometry['src2obj']) / geometry['src2obj']
+    size = vol_shape * geometry['det_pixel'] / mag
 
     if (slice_first is not None) & (slice_last is not None):
         # Generate volume geometry for one chunk of data:
@@ -150,10 +218,10 @@ def get_vol_geom(vol_shape, geometry, slice_first = None, slice_last = None):
         # Compute offset from the centre:
         centre = (length - 1) / 2
         offset = (slice_first + slice_last) / 2 - centre
-        offset = offset * geometry['img_pixel']
+        offset = offset * geometry['det_pixel'] / mag
         
         shape = [slice_last - slice_first + 1, vol_shape[1], vol_shape[2]]
-        size = shape * geometry['img_pixel']
+        size = shape * geometry['det_pixel'] / mag
 
     else:
         shape = vol_shape
@@ -165,11 +233,10 @@ def get_vol_geom(vol_shape, geometry, slice_first = None, slice_last = None):
         
     return vol_geom    
 
-def get_proj_geom(geometry, data_shape, index_first = None, index_last = None):
+def astra_proj_geom(geometry, data_shape, index_first = None, index_last = None):
     """
     Generate the vector that describes positions of the source and detector.
     """
-    
     # Basic geometry:
     det_count_x = data_shape[1]
     det_count_z = data_shape[0]
@@ -195,7 +262,6 @@ def get_proj_geom(geometry, data_shape, index_first = None, index_last = None):
     
     # Modify vector and apply it to astra projection geometry:
     for ii in range(0, vectors.shape[0]):
-        
         # Define vectors:
         src_vect = vectors[ii, 0:3]    
         det_vect = vectors[ii, 3:6]    
@@ -210,26 +276,26 @@ def get_proj_geom(geometry, data_shape, index_first = None, index_last = None):
         px = geometry['det_pixel']
             
         #Detector shift (V):
-        det_vect += geometry['det_vrt'] * det_axis_vrt / px
+        det_vect += geometry['det_tra'][1] * det_axis_vrt / px
 
         #Detector shift (H):
-        det_vect += geometry['det_hrz'] * det_axis_hrz / px
+        det_vect += geometry['det_tra'][0] * det_axis_hrz / px
 
         #Detector shift (M):
-        det_vect += geometry['det_mag'] * det_normal /  px
+        det_vect += geometry['det_tra'][2] * det_normal /  px
 
         #Source shift (V):
-        src_vect += geometry['src_vrt'] * det_axis_vrt / px
+        src_vect += geometry['src_tra'][1] * det_axis_vrt / px
 
         #Source shift (H):
-        src_vect += geometry['src_hrz'] * det_axis_hrz / px
+        src_vect += geometry['src_tra'][0] * det_axis_hrz / px
 
         #Source shift (M):
-        src_vect += geometry['src_mag'] * det_normal / px
+        src_vect += geometry['src_tra'][2] * det_normal / px
 
         # Rotation axis shift:
-        det_vect -= geometry['axs_hrz'] * det_axis_hrz  / px
-        src_vect -= geometry['axs_hrz'] * det_axis_hrz  / px
+        det_vect -= geometry['axs_tra'][0] * det_axis_hrz  / px
+        src_vect -= geometry['axs_tra'][0] * det_axis_hrz  / px
 
         # Rotation relative to the detector plane:
         # Compute rotation matrix
@@ -252,7 +318,7 @@ def get_proj_geom(geometry, data_shape, index_first = None, index_last = None):
         # Add translation:
         vect_norm = det_axis_vrt[2]
         
-        T = numpy.array([geometry['vol_hrz'] * vect_norm / px, geometry['vol_mag'] * vect_norm, geometry['vol_vrt'] * vect_norm / px])    
+        T = numpy.array([geometry['vol_tra'][0] * vect_norm / px, geometry['vol_tra'][2] * vect_norm, geometry['vol_tra'][1] * vect_norm / px])    
         src_vect[:] -= T            
         det_vect[:] -= T
     
@@ -260,14 +326,33 @@ def get_proj_geom(geometry, data_shape, index_first = None, index_last = None):
     
     return proj_geom   
 
+def create_geometry(src2obj, det2obj, det_pixel, theta_range, theta_count):
+    """
+    Initialize an empty geometry record.
+    """
+    
+    # Create an empty dictionary:
+    geometry = {'det_pixel':det_pixel, 'det_tra':[0., 0., 0.], 'src_tra':[0., 0., 0.], 
+    'axs_tra':[0., 0., 0.], 'det_rot':0., 'vol_rot':[0. ,0. ,0.], 'vol_tra':[0., 0., 0.], 
+    'src2obj': src2obj, 'det2obj':det2obj, 'unit':'millimeter', 'type':'flex', 'binning': 1}
+ 
+    # Generate thetas explicitly:
+    geometry['thetas'] = numpy.linspace(theta_range[0], theta_range[1], theta_count, dtype = 'float32') 
+
+    return geometry 
+
 def _read_tiff_(file, sample, x_roi, y_roi):
     """
     Read a single image.
     """
     
-    tiff = TIFF.open(file, mode='r')
-    im = tiff.read_image()
-    tiff.close()
+    #tiff = TIFF.open(file, mode='r')
+    #im = tiff.read_image()
+    #tiff.close()
+    #im = scipy.misc.imread(file)
+    im = imageio.imread(file, offset = 0)
+    
+    # TODO: Use kwags offset  and size to apply roi!
     
     if (y_roi != []):
         im = im[y_roi[0]:y_roi[1], :]
@@ -278,11 +363,13 @@ def _read_tiff_(file, sample, x_roi, y_roi):
         im = im[::sample, ::sample]
     
     return im
- 
+
 def _get_flexray_keywords_():                  
-    
+    """
+    Create dictionary needed to read FlexRay log file.
+    """
     # Dictionary that describes the Flexray file:        
-    geom_keywords = {'voxel size':'img_pixel',
+    geometry =     {'voxel size':'img_pixel',
                     'sod':'src2obj',
                     'sdd':'src2det',
                     
@@ -292,14 +379,14 @@ def _get_flexray_keywords_():
                     'tra_obj':'axs_hrz',
                     'tra_tube':'src_hrz',
                     
-                    '# projections':'theta_n',
+                    '# projections':'theta_count',
                     'last angle':'last_angle',
                     'start angle':'first_angle',
                     
                     'binning value':'binning',
                     'roi (ltrb)':'roi'}
                     
-    physics_keywords = {'tube voltage':'voltage',
+    settings =     {'tube voltage':'voltage',
                     'tube power':'power',
                     'number of averages':'averages',
                     'imaging mode':'mode',
@@ -308,13 +395,44 @@ def _get_flexray_keywords_():
                     
                     'exposure time (ms)':'exposure'}
 
-    lyrics_keywords = {'Sample name' : 'comments',
-                    'Comment' : 'name',
-                    
+    description =  {'Sample name' : 'comments',
+                    'Comment' : 'name',                    
+
                     'date':'date'}
                     
-    return geom_keywords, physics_keywords, lyrics_keywords                
+    return [geometry, settings, description]                
 
+def _format_geometry_(records):
+    """
+    Format the raw records to a internal geometry definition:
+    """
+    # Transfer from raw record format to our internal format:
+    geometry = {}
+    geometry['type'] = records['type']
+    geometry['unit'] = records['unit']
+    geometry['src2obj'] = records['src2obj']
+    geometry['det2obj'] = records['det2obj']
+    geometry['binning'] = records['binning']
+    geometry['det_pixel'] = records['det_pixel']
+    
+    # In geometry type == flexray, det_tra, src_tra etc. 
+    # are given relative to a default positions that depend on src2obj and det2obj 
+    geometry['det_tra'] = [records['det_hrz'], records['det_vrt'], records['det_mag']]    
+    geometry['src_tra'] = [records['src_hrz'], records['src_vrt'], records['src_mag']]     
+    geometry['vol_tra'] = [records['vol_hrz'], records['vol_vrt'], records['vol_mag']] 
+    
+    geometry['vol_rot'] = [0. ,0. ,0.]
+    geometry['det_rot'] = records['det_rot']
+    
+    geometry['roi'] = records['roi']
+    
+    geometry['axs_tra'] = [records['axs_hrz'], 0, 0]
+    
+    # Generate thetas explicitly:
+    geometry['thetas'] = numpy.linspace(records['first_angle'], records['last_angle'], records['theta_count'], dtype = 'float32')
+    
+    return geometry
+   
 def _correct_flex_(records):   
     """
     Apply some Flexray specific corrections to the geometry record.
@@ -343,27 +461,13 @@ def _correct_flex_(records):
     
     maginfication = (records['det2obj'] + records['src2obj']) / records['src2obj']
 
-    records['det_pixel'] = records['img_pixel'] * maginfication
-      
-def empty_geometry(src2obj, src2det, theta_range, theta_n):
-    """
-    Initialize an empty geometry record.
-    """
+    records['det_pixel'] = records['img_pixel'] * maginfication  
+           
+    return records
     
-    # Create an empty dictionary:
-    geometry = {'theta_n': theta_n,'first_angle': theta_range[0], 'last_angle':theta_range[1],
-    'det_pixel':0, 'det_vrt':0, 'det_hrz':0, 'det_mag':0, 'src_vrt':0, 'src_hrz':0, 
-    'src_mag':0, 'axs_hrz':0, 'det_rot':0, 'vol_rot':[0,0,0], 'binning':0,'vol_hrz':0,
-    'vol_vrt':0,'vol_mag':0, 'src2obj': 0, 'src2det':src2det}
-
-    # Generate thetas explicitly:
-    geometry['thetas'] = numpy.linspace(geometry['first_angle'], geometry['last_angle'], geometry['theta_n'], dtype = 'float32') 
-
-    return geometry        
-    
-def _parse_keywords_(path, file_mask, geom_keywords, phys_keywords, lyr_keywords, separator = ':'):
+def _parse_keywords_(path, file_mask, dictionary, separator = ':'):
     '''
-    Parse a text file using the keywords dictionary and create a dictionary with values.
+    Parse a text file using the keywords dictionary and create a dictionary with values
     '''
     
     # Try to find the log file in the selected path and file_mask
@@ -380,10 +484,10 @@ def _parse_keywords_(path, file_mask, geom_keywords, phys_keywords, lyr_keywords
         log_file = os.path.join(path, log_file[0])
 
     # Create an empty dictionary:
-    geometry = empty_geometry([0, 360], 2)
+    geometry = create_geometry(0, 0, 0, [0, 360], 0)
 
-    physics = {}
-    lyrics = {}
+    settings = {}
+    description = {}
 
     # Loop to read the file record by record:
     with open(log_file, 'r') as logfile:
@@ -392,14 +496,11 @@ def _parse_keywords_(path, file_mask, geom_keywords, phys_keywords, lyr_keywords
             name = name.strip().lower()
             
             # If name contains one of the keys (names can contain other stuff like units):
-            _interpret_record_(name, var, geom_keywords, geometry)
-            _interpret_record_(name, var, phys_keywords, physics)
-            _interpret_record_(name, var, lyr_keywords, lyrics)    
-            
-    # Generate thetas explicitly:
-    geometry['thetas'] = numpy.linspace(geometry['first_angle'], geometry['last_angle'], geometry['theta_n'], dtype = 'float32')        
-
-    return geometry, physics, lyrics 
+            _interpret_record_(name, var, dictionary[0], geometry)
+            _interpret_record_(name, var, dictionary[1], settings)
+            _interpret_record_(name, var, dictionary[2], description)    
+               
+    return geometry, settings, description 
     
 def _interpret_record_(name, var, keywords, output):
     """

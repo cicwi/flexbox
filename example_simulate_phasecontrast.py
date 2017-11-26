@@ -8,44 +8,53 @@ import flexData
 import flexProject
 import flexUtil
 import flexModel
+import flexSpectrum
 
 import numpy
 
 #%% Create volume and forward project:
     
+# Initialize images:    
 vol = numpy.zeros([1, 512, 512], dtype = 'float32')
 proj = numpy.zeros([1, 361, 512], dtype = 'float32')
 
-geometry = flexData.empty_geometry([0, 360], 361)
-geometry['']
+# Define a simple projection geometry:
+src2obj = 100
+det2obj = 100    
+det_pixel = 0.1
 
-flexModel.phantom(vol, 'sphere', [150, 15])    
+geometry = flexData.create_geometry(src2obj, det2obj, det_pixel, [0, 360], 361)
 
-flexProject.FDK(proj, vol, geometry)
+# Create phantom and project into proj:
+vol = flexModel.phantom(vol.shape, 'bubble', [150, 15])     
+flexProject.forwardproject(proj, vol, geometry)
 
-#%% Read
+#%%
+# Get the material refraction index:
+c = flexSpectrum.find_nist_name('Calcium Carbonate')    
+rho = c['density'] 
+z = (numpy.array(c['Elements']) * numpy.array(c['massFractions'])).sum()
 
-path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/'
+n_calcium = flexSpectrum.material_refraction('Calcium Carbonate', rho, z, energy)
+proj = numpy.exp(-proj * numpy.imag(n_calcium))
 
-dark = flexData.read_raw(path, 'di')
-flat = flexData.read_raw(path, 'io')    
-proj = flexData.read_raw(path, 'scan_')
-
-geometry, p, l = flexData.read_log(path, 'flexray')   
- 
-#%% Prepro:
+# Display:
+flexUtil.display_slice(proj) 
+   
+#%% Phase contrast effect:
     
-proj = (proj - dark) / (flat.mean(0) - dark)
-proj = -numpy.log(proj)
+energy = 30
 
-proj = flexData.astra_projections(proj)    
+# Ratio between phase and attenuation effects needed to construct propagator 
+alpha = numpy.imag(n_calcium) / numpy.real(n_calcium)
+
+# Propagator (Dual CTF):
+p = flexModel.get_PSF(shape, mode = 'gaussian', [det_pixel, energy, src2obj, det2obj, alpha])
+
+for ii in range(proj.shape[1]):
+    img = proj[ii]
+    img = flexModel.apply_PSF(img, p)
+
+flexModel.apply_noise(proj, 1e4)
 
 flexUtil.display_slice(proj)
-
-#%% Recon
-
-
-
-flexProject.FDK(proj, vol, geometry)
-
-flexUtil.display_slice(vol)
