@@ -17,35 +17,41 @@ phys_const = {'c': 299792458, 'h':6.62606896e-34, 'h_ev':4.13566733e-15, 'h_bar'
                   'e':1.602176565e-19, 'Na':6.02214179e23, 're': 2.817940289458e-15,'me':9.10938215e-31, 'me_ev':0.510998910e6}
 const_unit = {'c': 'm/c', 'h':'J*S', 'h_ev':'e*Vs', 'h_bar':'J*s', 'h_bar_ev':'eV*s' , 'e':'colomb', 'Na':'1/mol', 're':'m','me':'kg', 'me_ev':'ev/c**2'}
 
-def material_refraction(compound, rho, Z, energy):
+def material_refraction(compound, rho, energy):
     """    
     Calculate complex refrative index of the material taking
     into account it's density. 
     
     Args:
-        compound (str): compound formula
+        compound (str): compound chemical formula
         rho (float): density in g / cm3
-        Z: avarage atomic number
         energy (numpy.array): energy in KeV   
         
     Returns:
         float: refraction index in [1/cm]
     """
     
+    cmp = xraylib.CompoundParser(compound)
+
+    # Compute ration of Z and A:
+    z = (numpy.array(cmp['Elements']))
+    a = [xraylib.AtomicWeight(x) for x in cmp['Elements']]
+    
+    za = ((z / a) * numpy.array(cmp['massFractions'])).sum()
+    
     # Electron density of the material:    
     Na = phys_const['Na']
-    
-    rho_e = rho * Z * Na
+    rho_e = rho * za * Na
     
     # Attenuation:
-    mu = rho * mass_attenuation(energy, compound)
+    mu = mass_attenuation(energy, compound)
     
     # Phase:
-    wavelength = 2 * numpy.pi * (phys_const['h_bar_ev'] * phys_const['c']) / energy    
+    wavelength = 2 * numpy.pi * (phys_const['h_bar_ev'] * phys_const['c']) / energy * 10   
                                 
     # TODO: check this against phantoms.m:                            
     phi = rho_e * phys_const['re'] * wavelength
-    
+                    
     # Refraction index (per cm)
     return rho * (mu/2 - 1j * phi)
                        
@@ -62,14 +68,14 @@ def mass_attenuation(energy, compound):
     else:
         return numpy.array([xraylib.CS_Total_CP(compound, e) for e in energy])
 
-def linear_attenuation(energy, compound, rho, thickness):
+def linear_attenuation(energy, compound, rho):
     '''
-    Total X-ray absorption for a given compound in cm2g. Energy is given in KeV
+    Total X-ray absorption for a given compound in 1/cm. Energy is given in KeV
     '''
     # xraylib might complain about types:
     energy = numpy.double(energy)        
     
-    return thickness * rho * mass_attenuation(energy, compound)
+    return rho * mass_attenuation(energy, compound)
     
 def compton(energy, compound):    
     '''
@@ -110,7 +116,7 @@ def photoelectric(energy, compound):
     else:
         return numpy.array([xraylib.CS_Photo_CP(compound, e) for e in energy])
     
-def scintillator_efficiency(energy, compound = 'BaFBr', rho = 5, thickness = 100):
+def scintillator_efficiency(energy, compound = 'BaFBr', rho = 5, thickness = 0.1):
     '''
     Generate QDE of a detector (scintillator). Units: KeV, g/cm3, cm.
     '''              
@@ -126,7 +132,7 @@ def total_transmission(energy, compound, rho, thickness):
     Units: KeV, g/cm3, cm.
     '''        
     # Attenuation by the photoelectric effect:
-    return numpy.exp(-linear_attenuation(energy, compound, rho, thickness))
+    return numpy.exp(-linear_attenuation(energy, compound, rho) * thickness)
 
 def bremsstrahlung(energy, energy_max):
     '''
@@ -162,7 +168,7 @@ def parse_compound(compund):
     '''
     return xraylib.CompoundParser(compund)
 
-def calibrate_spectrum(projections, volume, energy = numpy.linspace(10,100, 9), compound = 'Al', density = 2.7, force_threshold = None, iterations = 100000):
+def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density = 2.7, threshold = None, iterations = 100000):
     '''
     Use the projection stack of a homogeneous object to estimate system's 
     effective spectrum.
@@ -171,41 +177,36 @@ def calibrate_spectrum(projections, volume, energy = numpy.linspace(10,100, 9), 
     Please, use conventional geometry. 
     ''' 
     
-    sz = projections.data.shape
+    sz = projections.shape
     
-    trim_proj = projections.copy()
-    trim_vol = volume.copy()
+    crop_proj = projections.copy()
+    crop_vol = volume.copy()
     
-    # Get 100 central slices:
+    # Apply crop:
     window = 1   
-    trim_proj.data.total = trim_proj.data.total[(sz[0]//2-window):(sz[0]//2+window), :, :]  
+    crop_proj = crop_proj[(sz[0]//2-window):(sz[0]//2+window), :, :]  
                                                 
-    sz = trim_vol.data.shape
-    trim_vol.data.total = trim_vol.data.total[(sz[0]//2-window):(sz[0]//2+window), :, :]        
-    
-    trim_vol.display.slice()                                          
+    sz = crop_vol.shape
+    crop_vol = crop_vol[(sz[0]//2-window):(sz[0]//2+window), :, :]        
                                    
     # Find the shape of the object:                                                    
-    #trim_vol.process.threshold(threshold = force_threshold)    
+    #crop_vol.process.threshold(threshold = force_threshold)    
     # This way might not work because of mishandling of parents...                      
-    if force_threshold:
-        trim_vol.data.total = numpy.array(trim_vol.data.total > force_threshold, 'float32')
+    if threshold:
+        crop_vol = numpy.array(crop_vol > threshold, 'float32')
     else:
-        trim_vol.data.total = numpy.array(trim_vol.data.total > (trim_vol.data.total.max()/2), 'float32')
-    
-    trim_vol.display.slice()  
-    
-    synth_proj = trim_proj.copy()
-    synth_proj.data.zeros()
+        crop_vol = numpy.array(crop_vol > (crop_vol.max()/2), 'float32')
+      
+    synth_proj = crop_proj.copy()
+    synth_proj *= 0
     
     # Forward project the shape:                  
-    print('Calculating the attenuation length.')    
-    recon = reconstruction.reconstruct(synth_proj, trim_vol)
-    recon.forwardproject()                                        
-            
+    print('Calculating the attenuation length.')  
+    flexProject.forwardproject(synth_proj, crop_vol, geometry)
+        
     # Projected length and intensity (only central slices):
-    length = synth_proj.data.total[window//2:-window//2,:,:]
-    intensity = trim_proj.data.total[window//2:-window//2,:,:]
+    length = synth_proj[window//2:-window//2,:,:]
+    intensity = crop_proj[window//2:-window//2,:,:]
 
     length = length.ravel()
     intensity = intensity.ravel()
@@ -258,7 +259,7 @@ def calibrate_spectrum(projections, volume, energy = numpy.linspace(10,100, 9), 
     print('Number of energy bins:', energy.size)
     
     nb_iter = iterations
-    mu = spectra.linear_attenuation(energy, compound, density, thickness = 0.1)
+    mu = spectra.linear_attenuation(energy, compound, density) * 0.1
     exp_matrix = numpy.exp(-numpy.outer(length_0, mu))
 
     spec = numpy.ones_like(energy)

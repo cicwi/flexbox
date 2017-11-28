@@ -15,6 +15,7 @@ import astra
 import astra.experimental as asex 
 import sys
 
+import flexUtil
 import flexData
 
 ''' * Methods * '''
@@ -82,7 +83,7 @@ def FDK(projections, volume, geometry):
     """
     backproject(projections, volume, geometry, 'FDK_CUDA')
     
-def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight': false, 'l2_update': true, 'preview':true}):
+def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight': False, 'l2_update': True, 'preview':True}):
     """
     SIRT
     """ 
@@ -99,8 +100,6 @@ def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight':
         
     for ii in range(iterations):
     
-        _l2 = 0
-
         projections_ = projections.copy()
         
         forwardproject(projections_, -volume, geometry)
@@ -108,27 +107,24 @@ def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight':
         # Take into account Poisson:
         if options['poisson_weight']:
             # Some formula representing the effect of photon starvation...
-            projections_ *= numpy.sqrt(numpy.exp(-projections_))
+            projections_ *= numpy.sqrt(numpy.exp(-projections))
             
         projections_ *= prj_weight    
-
-        # L2 norm:
-        if self.options['L2_update']:
-            #print('L2',numpy.sqrt((proj_data ** 2).mean()))
-            _l2 += numpy.sqrt((projections_ ** 2).mean())
         
         backproject(projections_, volume, geometry, 'BP3D_CUDA')    
+
+        # L2 norm:
+        if options['L2_update']:
+            l2.append(numpy.sqrt((projections_ ** 2).mean()))
             
-        l2.append(_l2)
-        
         # Preview
         if options['preview']:
-            flexUtil.display_slice(dim = 0)
+            flexUtil.display_slice(volume, dim = 0)
             
         misc.progress_bar((ii+1) / iterations)
         
-        plt.figure(15)
-        plt.plot(l2)
-        plt.title('Residual L2')
+    plt.figure(15)
+    plt.plot(l2)
+    plt.title('Residual L2')
         
         

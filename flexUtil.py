@@ -63,7 +63,14 @@ def equivalent_density( energy, spectrum, compound, density):
         
     self._parent.meta.history.add_record('process.equivalent_thickness(energy, spectrum, compound, density)', [energy, spectrum, compound, density])    
 
-def plot(x, y):
+def plot(x, y = None):
+    
+    if y is None:
+        y = x
+        x = numpy.arange(x.size)
+    
+    x = numpy.squeeze(x)
+    y = numpy.squeeze(y)
     
     plt.figure()
     plt.plot(x, y)
@@ -82,6 +89,7 @@ def display_slice(data, index = None, dim = 0):
     elif dim == 2:
         img = data[:, :, index]
 
+    plt.figure()
     plt.imshow(img)
     plt.colorbar()
 
