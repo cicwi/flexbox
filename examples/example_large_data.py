@@ -15,16 +15,21 @@ path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/
 
 dark = flexData.read_raw(path, 'di')
 flat = flexData.read_raw(path, 'io')    
-proj = flexData.read_raw(path, 'scan_')
+proj = flexData.read_raw(path, 'scan_', disk_map = '/export/scratch3/kostenko/flexbox_swap/swap.prj')
 
 meta = flexData.read_log(path, 'flexray')   
  
 #%% Prepro:
     
-proj = (proj - dark) / (flat.mean(0) - dark)
-proj = -numpy.log(proj)
+# Now, since the data is on the harddisk, we shouldn't lose the pointer to it!    
+# Be careful which operations to apply. Implicit are OK.
+proj -= dark
+proj /= (flat.mean(0) - dark)
 
-proj = flexData.astra_projections(proj)    
+numpy.log(proj, out = proj)
+proj *= -1
+
+proj = flexData.raw2astra(proj)    
 
 flexUtil.display_slice(proj)
 

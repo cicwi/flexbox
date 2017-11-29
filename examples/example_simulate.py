@@ -34,3 +34,9 @@ vol_rec = numpy.zeros_like(vol)
 
 flexProject.FDK(proj, vol_rec, geometry)
 flexUtil.display_slice(vol_rec)
+
+#%% EM
+vol_rec = numpy.zeros_like(vol)
+
+flexProject.EM(proj, vol_rec, geometry, iterations = 20)
+flexUtil.display_slice(vol_rec)

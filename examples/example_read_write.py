@@ -8,9 +8,9 @@ import flexData
 
 #%% Read / write a geometry file:
 
-#path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/'
+path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/'
 
-path = 'D:\\Data\\al_dummy_vertical_tile_1\\'
+#path = 'D:\\Data\\al_dummy_vertical_tile_1\\'
 
 meta = flexData.read_log(path, 'flexray') 
 

@@ -11,13 +11,16 @@ This module uses NIST data (embedded in xraylib module) to simulate x-ray spectr
 
 import numpy
 import xraylib
+import flexProject
+import flexSpectrum
+import matplotlib.pyplot as plt
 
 # Some useful physical constants:
 phys_const = {'c': 299792458, 'h':6.62606896e-34, 'h_ev':4.13566733e-15, 'h_bar':1.054571628e-34,'h_bar_ev': 6.58211899e-16, 
                   'e':1.602176565e-19, 'Na':6.02214179e23, 're': 2.817940289458e-15,'me':9.10938215e-31, 'me_ev':0.510998910e6}
 const_unit = {'c': 'm/c', 'h':'J*S', 'h_ev':'e*Vs', 'h_bar':'J*s', 'h_bar_ev':'eV*s' , 'e':'colomb', 'Na':'1/mol', 're':'m','me':'kg', 'me_ev':'ev/c**2'}
 
-def material_refraction(compound, rho, energy):
+def material_refraction(energy, compound, rho):
     """    
     Calculate complex refrative index of the material taking
     into account it's density. 
@@ -28,7 +31,7 @@ def material_refraction(compound, rho, energy):
         energy (numpy.array): energy in KeV   
         
     Returns:
-        float: refraction index in [1/cm]
+        float: refraction index in [1/mm]
     """
     
     cmp = xraylib.CompoundParser(compound)
@@ -52,8 +55,8 @@ def material_refraction(compound, rho, energy):
     # TODO: check this against phantoms.m:                            
     phi = rho_e * phys_const['re'] * wavelength
                     
-    # Refraction index (per cm)
-    return rho * (mu/2 - 1j * phi)
+    # Refraction index (per mm)
+    return rho * (mu/2 - 1j * phi) / 10
                        
 def mass_attenuation(energy, compound):
     '''
@@ -70,12 +73,13 @@ def mass_attenuation(energy, compound):
 
 def linear_attenuation(energy, compound, rho):
     '''
-    Total X-ray absorption for a given compound in 1/cm. Energy is given in KeV
+    Total X-ray absorption for a given compound in 1/mm. Energy is given in KeV
     '''
     # xraylib might complain about types:
     energy = numpy.double(energy)        
     
-    return rho * mass_attenuation(energy, compound)
+    # unit: [1/mm]
+    return rho * mass_attenuation(energy, compound) / 10
     
 def compton(energy, compound):    
     '''
@@ -116,12 +120,12 @@ def photoelectric(energy, compound):
     else:
         return numpy.array([xraylib.CS_Photo_CP(compound, e) for e in energy])
     
-def scintillator_efficiency(energy, compound = 'BaFBr', rho = 5, thickness = 0.1):
+def scintillator_efficiency(energy, compound = 'BaFBr', rho = 5, thickness = 1):
     '''
-    Generate QDE of a detector (scintillator). Units: KeV, g/cm3, cm.
+    Generate QDE of a detector (scintillator). Units: KeV, g/cm3, mm.
     '''              
     # Attenuation by the photoelectric effect:
-    spectrum = 1 - numpy.exp(- thickness * rho * photoelectric(energy, compound))
+    spectrum = 1 - numpy.exp(- thickness * rho * photoelectric(energy, compound) / 10)
         
     # Normalize:
     return spectrum / spectrum.max()
@@ -129,7 +133,7 @@ def scintillator_efficiency(energy, compound = 'BaFBr', rho = 5, thickness = 0.1
 def total_transmission(energy, compound, rho, thickness):
     '''
     Compute fraction of x-rays transmitted through the filter. 
-    Units: KeV, g/cm3, cm.
+    Units: KeV, g/cm3, mm.
     '''        
     # Attenuation by the photoelectric effect:
     return numpy.exp(-linear_attenuation(energy, compound, rho) * thickness)
@@ -168,7 +172,7 @@ def parse_compound(compund):
     '''
     return xraylib.CompoundParser(compund)
 
-def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density = 2.7, threshold = None, iterations = 100000):
+def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density = 2.7, threshold = None, iterations = 100000, n_bin = 10):
     '''
     Use the projection stack of a homogeneous object to estimate system's 
     effective spectrum.
@@ -176,56 +180,48 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     thickness projection stack.
     Please, use conventional geometry. 
     ''' 
-    
-    sz = projections.shape
-    
-    crop_proj = projections.copy()
-    crop_vol = volume.copy()
-    
-    # Apply crop:
-    window = 1   
-    crop_proj = crop_proj[(sz[0]//2-window):(sz[0]//2+window), :, :]  
-                                                
-    sz = crop_vol.shape
-    crop_vol = crop_vol[(sz[0]//2-window):(sz[0]//2+window), :, :]        
-                                   
+
     # Find the shape of the object:                                                    
-    #crop_vol.process.threshold(threshold = force_threshold)    
-    # This way might not work because of mishandling of parents...                      
+    segmentation = numpy.zeros_like(volume)
+        
     if threshold:
-        crop_vol = numpy.array(crop_vol > threshold, 'float32')
+        segmentation = numpy.array(volume > threshold, 'float32')
     else:
-        crop_vol = numpy.array(crop_vol > (crop_vol.max()/2), 'float32')
-      
-    synth_proj = crop_proj.copy()
-    synth_proj *= 0
+        max_ = numpy.percentile(volume, 99)
+        segmentation = numpy.array(volume > (max_/2), 'float32')
+    
+    # Reprojected length:   
+    length = numpy.zeros_like(projections)
     
     # Forward project the shape:                  
     print('Calculating the attenuation length.')  
-    flexProject.forwardproject(synth_proj, crop_vol, geometry)
-        
-    # Projected length and intensity (only central slices):
-    length = synth_proj[window//2:-window//2,:,:]
-    intensity = crop_proj[window//2:-window//2,:,:]
-
-    length = length.ravel()
-    intensity = intensity.ravel()
+    length = numpy.ascontiguousarray(length)
+    flexProject.forwardproject(length, segmentation, geometry)
     
-    print('Maximum reprojected length:', length.max())
-    print('Minimum reprojected length:', length.min())
+    import flexModel
+    ctf = flexModel.get_ctf(length.shape[::2], 'gaussian', [1, 1])
+    length = flexModel.apply_ctf(length, ctf)  
+            
+    # TODO: Some cropping might be needed to avoid artefacts at the edges
+    
+    length = length.ravel()
+    intensity = numpy.exp(-projections.ravel())
+    
+    lmax = length.max()
+    lmin = length.min()
+    
+    print('Maximum reprojected length:', lmax)
+    print('Minimum reprojected length:', lmin)
     
     print('Number of intensity-length pairs:', length.size)
     
     print('Computing the intensity-length transfer function.')
+        
+    # Bin number for lengthes:
+    bin_n = 256
+    bins = numpy.linspace(lmin, lmax, bin_n)
     
-    intensity = numpy.exp(-intensity)
-    
-    # Bin length (with half a pixel bin size):
-    #max_len = length.max()    
-    #bin_n = numpy.int(max_len * 2)
-    bin_n = 1000
-    
-    bins = numpy.linspace(0.2, length.max() * 0.9, bin_n)
+    # REbin:
     idx  = numpy.digitize(length, bins)
 
     # Rebin length and intensity:        
@@ -236,8 +232,8 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     length_0 = numpy.array(length_0)
     
     # Get rid of nans and more than 1 values:
-    length_0 = length_0[intensity_0 < 1]
-    intensity_0 = intensity_0[intensity_0 < 1]
+    length_0 = length_0[intensity_0 < 0.99]
+    intensity_0 = intensity_0[intensity_0 < 0.99]
     
     # Enforce zero-one values:
     length_0 = numpy.insert(length_0, 0, 0)
@@ -248,18 +244,17 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     # Display:
     plt.figure()
     plt.scatter(length[::100], intensity[::100], color='k', alpha=.2, s=2)
-    plt.plot(length_0, intensity_0, 'r--', lw=4, alpha=.8)
+    plt.plot(length_0, intensity_0, 'r:', lw=4, alpha=.8)
     plt.axis('tight')
     plt.title('Intensity v.s. absorption length.')
     plt.show() 
     
     print('Computing the spectrum by Expectation Maximization.')
     
-    print('Number of length bins:', intensity_0.size)
-    print('Number of energy bins:', energy.size)
+    energy = numpy.linspace(5, 100, n_bin)
     
     nb_iter = iterations
-    mu = spectra.linear_attenuation(energy, compound, density) * 0.1
+    mu = linear_attenuation(energy, compound, density)
     exp_matrix = numpy.exp(-numpy.outer(length_0, mu))
 
     spec = numpy.ones_like(energy)
@@ -273,17 +268,51 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
         spec = spec / spec.sum()
 
     print('Spectrum computed.')
-         
-    plt.figure()
-    plt.plot(energy, spec) 
-    plt.title('Calculated spectrum.')
-        
-    i_synthetic = exp_matrix.dot(spec)
     
-    # Synthetic spread of Al:
+    # Display:
     plt.figure()
-    plt.plot(length_0, intensity_0) 
-    plt.plot(length_0, i_synthetic) 
-    plt.legend(['Measured intensity','Synthetic intensity'])
+    plt.plot(energy, spec, 'b')
+    plt.axis('tight')
+    plt.title('Calculated spectrum')
+    plt.show() 
+             
+    return energy, spec
+
+def equivalent_density(projections, geometry, energy, spectrum, compound, density):
+    '''
+    Transfrom intensity values to projected density for a single material data
+    '''
+    # Assuming that we have log data!
     
-    return energy, spec, length_0, intensity_0
+    print('Generating the transfer function.')
+    
+    # Attenuation of 1 mm:
+    mu = linear_attenuation(energy, compound, density)
+    
+    # Make thickness range that is sufficient for interpolation:
+    m = (geometry['src2obj'] + geometry['det2obj']) / geometry['src2obj']
+    img_pix = geometry['det_pixel'] / m
+
+    thickness_min = 0
+    thickness_max = max(projections.shape) * img_pix
+    
+    print('Assuming thickness range:', [thickness_min, thickness_max])
+    thickness = numpy.linspace(thickness_min, thickness_max, max(projections.shape))
+    
+    exp_matrix = numpy.exp(-numpy.outer(thickness, mu))
+    synth_counts = exp_matrix.dot(spectrum)
+    
+    synth_counts = -numpy.log(synth_counts)
+    
+    plt.figure()
+    plt.plot(thickness, synth_counts, 'r-', lw=4, alpha=.8)
+    plt.axis('tight')
+    plt.title('Attenuation v.s. thickness [mm].')
+    plt.show()
+    
+    print('Callibration attenuation range:', [synth_counts[0], synth_counts[-1]])
+    print('Data attenuation range:', [projections.min(), projections.max()])
+
+    print('Applying transfer function.')    
+    
+    return numpy.array(numpy.interp(projections, synth_counts, thickness * density), dtype = 'float32')

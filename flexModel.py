@@ -17,7 +17,7 @@ def phantom(shape, mode = 'bubble', parameters = [10, 1]):
     
     Args:
         shape (list): shape of the volume 
-        type (str): use 'bubble' or 'pearl'
+        type (str): use 'bubble' or 'ball'
         parameters (list or float): for the bubble - [outer radius, wall thickness], pearl - radius
     """    
     
@@ -31,10 +31,13 @@ def phantom(shape, mode = 'bubble', parameters = [10, 1]):
         r0 = (parameters[0] - parameters[1])**2
         r1 = (parameters[0])**2
     
-        vol = numpy.array(((vol > r0) & (vol < r1)), dtype = 'float32')                 
-    elif mode == 'pearl':
+        vol = numpy.array(((vol > r0) & (vol < r1)), dtype = 'float32')   
+              
+    elif mode == 'ball':
         r0 = parameters[0] ** 2
         vol = numpy.array((vol < r0), dtype = 'float32') 
+        
+    else: ValueError('Unknown phantom type!')
 
     return vol                
 
@@ -85,7 +88,8 @@ def get_ctf(shape, mode = 'gaussian', parameter = 1):
         # Frequency square:
         w2 = _w2_space_(shape, pixelsize)
         
-        return -2 * numpy.cos(w2 * r_eff / (2*k)) + 2 * (alpha) * numpy.sin(w2 * r_eff / (2*k))
+        #return -2 * numpy.cos(w2 * r_eff / (2*k)) + 2 * (alpha) * numpy.sin(w2 * r_eff / (2*k))
+        return numpy.cos(w2 * r_eff / (2*k)) - (alpha) * numpy.sin(w2 * r_eff / (2*k))
     
     elif mode == 'fresnel':
         
@@ -106,6 +110,27 @@ def get_ctf(shape, mode = 'gaussian', parameter = 1):
         w2 = _w2_space_(shape, pixelsize)
         
         return numpy.exp(1j * w2 * r_eff / (2*k))
+        
+    elif mode == 'tie':
+        
+        # Transport of intensity equation approximation of phase contrast:
+        pixelsize = parameter[0]
+        energy = parameter[1]
+        r1 = parameter[2]
+        r2 = parameter[3]
+        alpha = parameter[4]
+        
+        # Effective propagation distance:
+        m = (r1 + r2) / r1
+        r_eff = r2 / m
+        
+        # Wavenumber;
+        k = energy / (flexSpectrum.phys_const['h_bar_ev'] * flexSpectrum.phys_const['c'])
+        
+        # Frequency square:
+        w2 = _w2_space_(shape, pixelsize)
+        
+        return 1 - alpha * w2 * r_eff / (2*k)
        
 def _w_space_(shape, dim, pixelsize):
     """
@@ -132,14 +157,35 @@ def apply_ctf(image, ctf):
     Apply CTF to the image using convolution.
     """
     if image.ndim > 2:
-        return numpy.fft.ifft2( numpy.fft.fft2(image, axes = (0, 2)) * ctf , axes = (0, 2))
+        
+        x = numpy.fft.fft2(image, axes = (0, 2)) * ctf
+        x = numpy.abs(numpy.fft.ifft2( x , axes = (0, 2)))
+        x = numpy.array(x, dtype = 'float32')
+        return x
     
     else:        
-        return numpy.fft.ifft2( numpy.fft.fft2(image) * ctf )
-      
-def apply_phase_contrast():
-    pass
+        x = numpy.fft.fft(image) * ctf
+        x = numpy.abs(numpy.fft.ifft2( x ))
+        x = numpy.array(x, dtype = 'float32')
+        return x
 
+def deapply_ctf(image, ctf, epsilon = 0.1):
+    """
+    Inverse convolution with Tikhonov regularization.
+    """
+    if image.ndim > 2:
+        
+        x = numpy.fft.fft2(image, axes = (0, 2)) * numpy.conj(ctf) / (abs(ctf) ** 2 + epsilon)
+        x = numpy.abs(numpy.fft.ifft2( x , axes = (0, 2)))
+        x = numpy.array(x, dtype = 'float32')
+        return x
+    
+    else:        
+        x = numpy.fft.fft(image) * numpy.conj(ctf) / (abs(ctf) ** 2 + epsilon)
+        x = numpy.abs(numpy.fft.ifft2( x ))
+        x = numpy.array(x, dtype = 'float32')
+        return x
+        
 def apply_noise(image, mode = 'poisson', parameter = 1):
     """
     Add noise to the data.
@@ -151,10 +197,10 @@ def apply_noise(image, mode = 'poisson', parameter = 1):
     """
     
     if mode == 'poisson':
-        image = numpy.random.poisson(image * parameter)
+        return numpy.random.poisson(image * parameter)
         
     elif mode == 'normal':
-        image = numpy.random.normal(image, parameter)
+        return numpy.random.normal(image, parameter)
         
     else: 
         raise ValueError('Me not recognize the mode! Use normal or poisson!')
