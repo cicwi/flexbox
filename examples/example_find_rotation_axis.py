@@ -7,12 +7,13 @@ Test flexData module.
 import flexData
 import flexProject
 import flexUtil
+import flexCompute
+
 import numpy
 
 #%% Read
 
 path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/'
-
 dark = flexData.read_raw(path, 'di')
 flat = flexData.read_raw(path, 'io')    
 proj = flexData.read_raw(path, 'scan_')
@@ -28,32 +29,19 @@ proj = flexData.raw2astra(proj)
 
 flexUtil.display_slice(proj, title = 'Sinogram')
 
+#%% Use optimize_rotation_center:
+    
+guess = flexCompute.optimize_rotation_center(proj, meta['geometry'], guess = 0, subscale = 16)
+
 #%% Recon
+meta['geometry']['axs_hrz'] = guess
 
-vol = numpy.zeros([1, 2000, 2000], dtype = 'float32')
-
+vol = flexProject.inint_volume(proj)
 flexProject.FDK(proj, vol, meta['geometry'])
 
 flexUtil.display_slice(vol, bounds = [], title = 'FDK')
 
-#%% EM
-
-vol = numpy.ones([50, 2000, 2000], dtype = 'float32')
-
-flexProject.EM(proj, vol, meta['geometry'], iterations = 5)
-
-flexUtil.display_slice(vol, title = 'EM')
-
-#%% SIRT
-vol = numpy.zeros([1, 2000, 2000], dtype = 'float32')
-
-options = {'bounds':[0, 1000], 'l2_update':True, 'block_number':1, 'index':'sequential'}
-flexProject.SIRT(proj, vol, meta['geometry'], iterations = 1, options = options)
-
-flexUtil.display_slice(vol, title = 'SIRT')
 
 #%%
-vol = numpy.ones([50, 2000, 2000], dtype = 'float32')
 
-flexProject.backproject(proj, vol, meta['geometry'])
-flexUtil.display_slice(vol, title = 'BP')
+

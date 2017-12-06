@@ -19,7 +19,7 @@ def anyslice(array, index, dim):
     Slice an array along an arbitrary dimension.
     """
     sl = [slice(None)] * array.ndim
-    sl[axis] = index
+    sl[dim] = index
       
     return array[sl]  
 
@@ -43,9 +43,12 @@ def cast2type(array, dtype, bounds = None):
         bounds = [numpy.amin(array), numpy.amax(array)]
     
     data_max = numpy.iinfo(dtype).max
-                          
+    
     array -= bounds[0]
     array *= data_max / (bounds[1] - bounds[0])
+    
+    array[array < 0] = 0
+    array[array > data_max] = data_max
     
     array = numpy.array(array, dtype)    
     

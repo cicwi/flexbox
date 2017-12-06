@@ -40,3 +40,12 @@ vol = numpy.zeros([50, 2000, 2000], dtype = 'float32')
 flexProject.FDK(proj, vol, meta['geometry'])
 
 flexUtil.display_slice(vol)
+
+#%% SIRT
+
+vol = numpy.ones([50, 2000, 2000], dtype = 'float32')
+
+options = {'block_number':10, 'index':'sequential'}
+flexProject.SIRT(proj, vol, meta['geometry'], iterations = 5)
+
+flexUtil.display_slice(vol, title = 'SIRT')

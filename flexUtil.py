@@ -10,12 +10,11 @@ Displaying and stuff...
 ''' * Imports * '''
 
 import numpy
-import misc
 import matplotlib.pyplot as plt
 
 ''' * Methods * '''
 
-def plot(x, y = None, title = None):
+def plot(x, y = None, semilogy = False, title = None):
     
     if y is None:
         y = x
@@ -25,12 +24,17 @@ def plot(x, y = None, title = None):
     y = numpy.squeeze(y)
     
     plt.figure()
-    plt.plot(x, y)
+    if semilogy:
+        plt.semilogy(x, y)
+    else:
+        plt.plot(x, y)
     
     if title:
         plt.title(title)
+        
+    plt.show()    
 
-def display_slice(data, index = None, dim = 0, title = None):
+def display_slice(data, index = None, dim = 0, bounds = None, title = None):
     
     if index is None:
         index = data.shape[dim] // 2
@@ -45,7 +49,11 @@ def display_slice(data, index = None, dim = 0, title = None):
         img = data[:, :, index]
 
     plt.figure()
-    plt.imshow(img)
+    if bounds:
+        plt.imshow(img, vmin = bounds[0], vmax = bounds[1])
+    else:
+        plt.imshow(img)
+        
     plt.colorbar()
     
     if title:

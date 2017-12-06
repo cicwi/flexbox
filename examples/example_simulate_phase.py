@@ -29,13 +29,14 @@ det_pixel = 0.001 / x # mm (1 micron)
 geometry = flexData.create_geometry(src2obj, det2obj, det_pixel, [0, 360], 361)
 
 # Create phantom (150 micron wide, 15 micron wall thickness):
-vol = flexModel.phantom(vol.shape, 'bubble', [150*x, 50*x])     
+vol = flexModel.phantom(vol.shape, 'bubble', [150*x, 30*x])     
+vol += flexModel.phantom(vol.shape, 'bubble', [10*x, 3*x])     
 flexProject.forwardproject(proj, vol, geometry)
 
 #%%
 # Get the material refraction index:
 c = flexSpectrum.find_nist_name('Calcium Carbonate')    
-rho = c['density'] 
+rho = c['density'] / 10
 
 energy = 30 # KeV
 n = flexSpectrum.material_refraction(energy, 'CaCO3', rho)
@@ -46,14 +47,16 @@ n = flexSpectrum.material_refraction(energy, 'CaCO3', rho)
 phase_ctf = flexModel.get_ctf(proj.shape[::2], 'fresnel', [det_pixel, energy, src2obj, det2obj])
 
 sigma = det_pixel 
-phase_ctf *= flexModel.get_ctf(proj.shape[::2], 'gaussian', [det_pixel, sigma])
+phase_ctf *= flexModel.get_ctf(proj.shape[::2], 'gaussian', [det_pixel, sigma * 1])
 
 # Electro-magnetic field image:
 proj_i = numpy.exp(-proj * n )
-#proj_i = numpy.abs(numpy.exp(-proj * n ))**2
+
 
 # Field intensity:
 proj_i = flexModel.apply_ctf(proj_i, phase_ctf) ** 2
+
+#proj_i = numpy.abs(numpy.exp(-proj * n ))**2
 
 flexUtil.display_slice(proj_i, title = 'Projections (phase contrast)')
 
@@ -84,28 +87,18 @@ vol_rec = numpy.zeros_like(vol)
 flexProject.FDK(-numpy.log(proj_inv), vol_rec, geometry)
 flexUtil.display_slice(vol_rec, title = 'FDK')   
 
-#%% SIRT:
+#%% SIRT algebraic deconvolution:
  
 vol_rec = numpy.zeros_like(vol)    
-flexProject.SIRT(-numpy.log(proj_inv), vol_rec, geometry, 50, options = {'bounds':[0, 50]})  
-  
-flexUtil.display_slice(vol_rec, title = 'SIRT') 
+options = {'bounds':[0, 10], 'l2_update':True, 'block_number':2, 'index':'sequential', 'ctf':dual_ctf}
+flexProject.SIRT(-numpy.log(proj_i), vol_rec, geometry, iterations = 10, options = options)
 
-flexUtil.display_slice(vol, title = 'Ground Truth') 
+flexUtil.display_slice(vol_rec, title = 'SIRT')
 
-#%% Simplified phase contrast simulation:
-    
-# Intensity image:    
-proj_i = numpy.abs(numpy.exp(-proj * n )) ** 2   
+#%% EM
+vol_rec = numpy.ones_like(vol)    
+options = {'l2_update':True, 'block_number':2, 'index':'sequential', 'ctf':dual_ctf}
+flexProject.EM(-numpy.log(proj_i), vol_rec, geometry, iterations = 1, options = options)
+flexUtil.display_slice(vol_rec, title = 'EM')
 
-flexUtil.display_slice(proj_i, title = 'Projections (intensity)') 
 
-# Propagate (approximate):
-alpha = numpy.imag(n) / numpy.real(n)
-dual_ctf = flexModel.get_ctf(proj.shape[::2], 'dual_ctf', [det_pixel, energy, src2obj, det2obj, alpha])    
-dual_ctf *= flexModel.get_ctf(proj.shape[::2], 'gaussian', [det_pixel, sigma])
-
-proj_i = flexModel.apply_ctf(proj_i, dual_ctf)
-
-flexUtil.display_slice(proj_i, title = 'Projections (approx. phase contrast)')  
-flexUtil.plot(dual_ctf)

@@ -8,6 +8,7 @@ import flexData
 import flexProject
 import flexUtil
 import numpy
+import pycuda
 
 #%% Read
 
@@ -47,6 +48,8 @@ flexUtil.display_slice(vol, title = 'EM')
 #%% SIRT
 vol = numpy.zeros([1, 2000, 2000], dtype = 'float32')
 
+
+
 options = {'bounds':[0, 1000], 'l2_update':True, 'block_number':1, 'index':'sequential'}
 flexProject.SIRT(proj, vol, meta['geometry'], iterations = 1, options = options)
 
@@ -57,3 +60,11 @@ vol = numpy.ones([50, 2000, 2000], dtype = 'float32')
 
 flexProject.backproject(proj, vol, meta['geometry'])
 flexUtil.display_slice(vol, title = 'BP')
+
+#%%
+import flexCompute
+
+#flexCompute._modifier_l2cost_(proj, meta['geometry'], [10, 8], -.0, 'axs_hrz', True)
+
+
+flexCompute.optimize_rotation_center(proj, meta['geometry'], guess = 0, subscale = 4, center_of_mass = False)

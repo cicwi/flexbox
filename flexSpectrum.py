@@ -12,8 +12,9 @@ This module uses NIST data (embedded in xraylib module) to simulate x-ray spectr
 import numpy
 import xraylib
 import flexProject
-import flexSpectrum
 import matplotlib.pyplot as plt
+import flexUtil
+import misc
 
 # Some useful physical constants:
 phys_const = {'c': 299792458, 'h':6.62606896e-34, 'h_ev':4.13566733e-15, 'h_bar':1.054571628e-34,'h_bar_ev': 6.58211899e-16, 
@@ -172,7 +173,7 @@ def parse_compound(compund):
     '''
     return xraylib.CompoundParser(compund)
 
-def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density = 2.7, threshold = None, iterations = 100000, n_bin = 10):
+def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density = 2.7, threshold = None, iterations = 1000, n_bin = 10):
     '''
     Use the projection stack of a homogeneous object to estimate system's 
     effective spectrum.
@@ -190,22 +191,36 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
         max_ = numpy.percentile(volume, 99)
         segmentation = numpy.array(volume > (max_/2), 'float32')
     
+    # Crop:    
+    height = segmentation.shape[0]   
+    w = 5
+    segmentation = segmentation[height//2-w:height//2 + w, : ,:]    
+    projections_ = projections[height//2-w:height//2 + w, : ,:]
+        
+    flexUtil.display_slice(segmentation, title = 'segmentation')
+    
     # Reprojected length:   
     length = numpy.zeros_like(projections)
+    
+    length = length[height//2-w:height//2 + w, : ,:]    
     
     # Forward project the shape:                  
     print('Calculating the attenuation length.')  
     length = numpy.ascontiguousarray(length)
+
     flexProject.forwardproject(length, segmentation, geometry)
     
-    import flexModel
-    ctf = flexModel.get_ctf(length.shape[::2], 'gaussian', [1, 1])
-    length = flexModel.apply_ctf(length, ctf)  
+    #import flexModel
+    #ctf = flexModel.get_ctf(length.shape[::2], 'gaussian', [1, 1])
+    #length = flexModel.apply_ctf(length, ctf)  
             
     # TODO: Some cropping might be needed to avoid artefacts at the edges
     
+    flexUtil.display_slice(length, title = 'length sinogram')
+    flexUtil.display_slice(projections_, title = 'apparent sinogram')
+    
     length = length.ravel()
-    intensity = numpy.exp(-projections.ravel())
+    intensity = numpy.exp(-projections_.ravel())
     
     lmax = length.max()
     lmin = length.min()
@@ -239,6 +254,10 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     length_0 = numpy.insert(length_0, 0, 0)
     intensity_0 = numpy.insert(intensity_0, 0, 1)
     
+    # Get rid of tales:
+    length_0 = length_0[:-20]    
+    intensity_0 = intensity_0[:-20]    
+        
     print('Intensity-length curve rebinned.')
     
     # Display:
@@ -315,4 +334,9 @@ def equivalent_density(projections, geometry, energy, spectrum, compound, densit
 
     print('Applying transfer function.')    
     
-    return numpy.array(numpy.interp(projections, synth_counts, thickness * density), dtype = 'float32')
+    for ii in range(projections.shape[1]):
+        
+        projections[:, ii, :] = numpy.array(numpy.interp(projections[:, ii, :], synth_counts, thickness * density), dtype = 'float32') 
+        misc.progress_bar((ii+1) / projections.shape[1])        
+        
+    return projections

@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Test flexData module.
+Test flexData module. CUPY test.
 """
 #%%
 import flexData
 import flexProject
 import flexUtil
 import numpy
+import cupy
 
 #%% Read
 
@@ -21,8 +22,14 @@ meta = flexData.read_log(path, 'flexray')
  
 #%% Prepro:
     
+# Convert to CUPY:    
+proj = cupy.array(proj)
+flat = cupy.array(flat)
+dark = cupy.array(dark)
+    
+# Use CUDA to compute stuff:
 proj = (proj - dark) / (flat.mean(0) - dark)
-proj = -numpy.log(proj)
+proj = -cupy.log(proj)
 
 proj = flexData.raw2astra(proj)    
 
@@ -35,25 +42,3 @@ vol = numpy.zeros([1, 2000, 2000], dtype = 'float32')
 flexProject.FDK(proj, vol, meta['geometry'])
 
 flexUtil.display_slice(vol, bounds = [], title = 'FDK')
-
-#%% EM
-
-vol = numpy.ones([50, 2000, 2000], dtype = 'float32')
-
-flexProject.EM(proj, vol, meta['geometry'], iterations = 5)
-
-flexUtil.display_slice(vol, title = 'EM')
-
-#%% SIRT
-vol = numpy.zeros([1, 2000, 2000], dtype = 'float32')
-
-options = {'bounds':[0, 1000], 'l2_update':True, 'block_number':1, 'index':'sequential'}
-flexProject.SIRT(proj, vol, meta['geometry'], iterations = 1, options = options)
-
-flexUtil.display_slice(vol, title = 'SIRT')
-
-#%%
-vol = numpy.ones([50, 2000, 2000], dtype = 'float32')
-
-flexProject.backproject(proj, vol, meta['geometry'])
-flexUtil.display_slice(vol, title = 'BP')

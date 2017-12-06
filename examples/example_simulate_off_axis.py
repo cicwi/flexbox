@@ -21,8 +21,10 @@ proj = numpy.zeros([1, 361, 512], dtype = 'float32')
 geometry = flexData.create_geometry(src2obj = 100, det2obj = 100, det_pixel = 0.01, theta_range = [0, 360], theta_count = 361)
 
 # Create phantom and project into proj:
-vol = flexModel.phantom(vol.shape, 'bubble', [150, 15])     
+vol = flexModel.phantom(vol.shape, 'ball', [150, 15])     
 flexUtil.display_slice(vol)
+
+geometry['axs_hrz'] = 80 * 0.01
 
 # Forward project:
 flexProject.forwardproject(proj, vol, geometry)
@@ -35,17 +37,29 @@ vol_rec = numpy.zeros_like(vol)
 flexProject.FDK(proj, vol_rec, geometry)
 flexUtil.display_slice(vol_rec)
 
-#%% EM
-vol_rec = numpy.zeros_like(vol)
+#%% Apply weighted FDK:
 
-options = {'bounds':[0, 10], 'l2_update':True, 'block_number':10, 'mode':'random'}
-flexProject.EM(proj, vol_rec, geometry, iterations = 10, options = options)
-flexUtil.display_slice(vol_rec)
+def ramp(data, length):
+    
+    data_ = data.copy()
+    ramp = numpy.linspace(0, numpy.pi/2, length)
+    ramp = numpy.sin(ramp)
+    
+    data_[:, :, :length] *= ramp[None, None, :]
+    data_[:, :, -length:] *= ramp[None, None, ::-1]
 
-#%% SIRT
-vol = numpy.zeros([1, 512, 512], dtype = 'float32')
+    return data_
 
-options = {'bounds':[0, 10], 'l2_update':True, 'block_number':10, 'mode':'random'}
-flexProject.SIRT(proj, vol, geometry, iterations = 40, options = options)
+vol_rec = numpy.zeros_like(vol)    
+vol_weight = numpy.zeros_like(vol)
 
-flexUtil.display_slice(vol, title = 'SIRT')
+#flexProject.FDK(proj * 0 + 1., vol_weight, geometry)
+#flexProject.FDK(proj, vol_rec, geometry)
+
+flexProject.FDK(ramp(proj * 0 + 1., 20), vol_weight, geometry)
+flexProject.FDK(ramp(proj, 20), vol_rec, geometry)
+
+vol_rec = vol_rec / (vol_weight**2 + 1e-5) * vol_rec
+
+
+flexUtil.display_slice(vol_rec)    
