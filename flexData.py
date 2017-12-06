@@ -14,8 +14,6 @@ We can now read/write:
 
 ''' * Imports * '''
 
-import toml
-import imageio
 import numpy
 import os
 import re
@@ -117,6 +115,9 @@ def write_raw(path, name, data, dim = 1, dtype = None):
         dim (int): dimension along which array is separated into images
         dtype (type): forse this data type       
     """
+    
+    import imageio
+    
     # Make path if does not exist:
     if not os.path.exists(path):
         os.makedirs(path)
@@ -146,6 +147,8 @@ def write_tiff(filename, image):
     """
     Write a single image.
     """ 
+    import imageio
+    
     imageio.imwrite(filename, image)           
         
 def read_log(path, name, log_type = 'flexray'):
@@ -202,9 +205,20 @@ def write_meta(file_path, meta):
         
     Returns:    
     """
+    
+    import toml
+    
     # Save TOML to a file:
     with open(file_path, 'w') as f:
         toml.dump(meta, f)
+        
+def write_astra(file_path, data_shape, meta):
+    """
+    Write an astra-readable projection geometry vector.
+    """        
+    geom = astra_proj_geom(meta['geometry'], data_shape)
+    
+    numpy.savetxt(file_path, geom['Vectors']) 
     
 def read_meta(file_path):
     """
@@ -212,6 +226,8 @@ def read_meta(file_path):
         
     Returns:
     """  
+    import toml
+    
     # Read string from a file:
     #with open(file_path, 'r') as myfile:
     #    string = myfile.read()#.replace('\n', '')
@@ -395,11 +411,8 @@ def _read_tiff_(file, sample = 1, x_roi = [], y_roi = []):
     """
     Read a single image.
     """
+    import imageio
     
-    #tiff = TIFF.open(file, mode='r')
-    #im = tiff.read_image()
-    #tiff.close()
-    #im = scipy.misc.imread(file)
     im = imageio.imread(file, offset = 0)
     
     # TODO: Use kwags offset  and size to apply roi!
