@@ -278,8 +278,10 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
         # Copy data to a block or simply pass a pointer to data itself if block is one.
         if (mode == 'sequential') & (block_number == 1):
             block = projections
+            
         else:
             block = (projections[:, index, :])
+            block = numpy.ascontiguousarray(block)
                 
         if ctf is None:
             
@@ -303,17 +305,19 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
         # Take into account Poisson:
         if options.get('poisson_weight'):
             # Some formula representing the effect of photon starvation...
-            synth *= numpy.sqrt(numpy.exp(-block))    
-                
+            block *= numpy.sqrt(numpy.exp(-projections[:, index, :]))    
+            
+        block *= prj_weight * block_number
+        
         # L2 norm (use the last block to update):
         if options.get('l2_update'):
-            l2 = (numpy.sqrt((synth ** 2).mean()))
+            l2 = (numpy.sqrt((block ** 2).mean()))
             
         else:
             l2 = [] 
           
         # Project
-        _backproject_block_(block * prj_weight * block_number, volume, proj_geom, vol_geom, 'BP3D_CUDA', operation)    
+        _backproject_block_(block, volume, proj_geom, vol_geom, 'BP3D_CUDA', operation)    
     
     # Apply bounds
     if options.get('bounds') is not None:
@@ -358,7 +362,7 @@ def _em_step_(projections, prj_weight, volume, geometry, options):
         else:
             block = (projections[:, index, :])
         
-        # Reserve memory for a forward projection (keep it separate because of CTF application):
+        # Reserve memory for a forward projection (keep it separate):
         synth = numpy.ascontiguousarray(numpy.zeros_like(block))
         
         # Forwardproject:
@@ -426,7 +430,7 @@ def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight':
          plt.plot(l2)
          plt.title('Residual L2')    
     
-def EM(projections, volume, geometry, iterations, options = {'preview':False, 'bounds':None,'l2_update': True}):
+def EM(projections, volume, geometry, iterations, options = {'preview':False, 'bounds':None, 'block_number':1, 'index':'sequential', 'l2_update': True}):
     """
     Expectation Maximization
     """ 
@@ -458,7 +462,7 @@ def EM(projections, volume, geometry, iterations, options = {'preview':False, 'b
         #backproject(projections, volume, geometry, 'BP3D_CUDA', operation = '*')    
         
         # Update volume:
-        l2_  = _em_step_(projections, 1, volume, geometry, options, operation = '*')
+        l2_  = _em_step_(projections, 1, volume, geometry, options)
         l2.append(l2_)
                     
         # Preview

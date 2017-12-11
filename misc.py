@@ -21,7 +21,7 @@ def anyslice(array, index, dim):
     sl = [slice(None)] * array.ndim
     sl[dim] = index
       
-    return array[sl]  
+    return sl
 
 def cast2type(array, dtype, bounds = None):
     """

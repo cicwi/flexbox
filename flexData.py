@@ -132,7 +132,8 @@ def write_raw(path, name, data, dim = 1, dtype = None):
         path_name = os.path.join(path, name + '_%06u.tiff'%ii)
         
         # Extract one slice from the big array
-        img = misc.anyslice(data, ii, dim)
+        sl = misc.anyslice(data, ii, dim)
+        img = data[sl]
           
         # Cast data to another type if needed
         if dtype is not None:

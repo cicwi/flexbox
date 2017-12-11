@@ -10,7 +10,51 @@ import numpy
 import flexUtil
 import flexData
 import flexProject
+from scipy import ndimage
+import misc
 
+def rotate(data, angle, axis = 0):
+    '''
+    Rotates the volume via interpolation.
+    '''
+    
+    print('Applying rotation.')
+    
+    misc.progress_bar(0)  
+    
+    sz = data.shape[axis]
+    
+    for ii in range(sz):     
+        
+        sl = misc.anyslice(data, ii, axis)
+        
+        data[sl] = ndimage.interpolation.rotate(data[sl], angle, reshape=False)
+        
+        misc.progress_bar((ii+1) / sz)
+        
+    return data
+        
+def translate(data, shift, axis = 0):
+    """
+    Apply a 2D tranlation perpendicular to the axis.
+    """
+    
+    print('Applying translation.')
+    
+    misc.progress_bar(0)  
+    
+    sz = data.shape[axis]
+    
+    for ii in range(sz):     
+        
+        sl = misc.anyslice(data, ii, axis)
+        
+        data[sl] = ndimage.interpolation.shift(data[sl], shift, order = 1, reshape=False)
+        
+        misc.progress_bar((ii+1) / sz)   
+
+    return data
+    
 def histogram(data, nbin = 256, plot = True, log = False):
     """
     Compute histogram of the data.
@@ -52,6 +96,8 @@ def moment(data, power, dim, centered = True):
         centered (bool): if centered, center of coordinates is in the middle of array.
         
     """
+    
+    
     # Create central indexes:
     shape = data.shape
 
@@ -68,7 +114,115 @@ def moment(data, power, dim, centered = True):
         return numpy.sum(x[None, :, None] * data)
     else:
         return numpy.sum(x[None, None, :] * data)
+        
+    def interpolate_holes(self, mask2d, kernel = [3,3,3]):
+        '''
+        Fill in the holes, for instance, saturated pixels.
+        
+        Args:
+            mask2d: holes are zeros. Mask is the same for all projections.
+        '''
+        
+        misc.progress_bar(0)        
+        for ii, block in enumerate(self._parent.data):    
+                    
+            # Compute the filler:
+            tmp = ndimage.filters.gaussian_filter(mask2d, sigma = kernel)        
+            tmp[tmp > 0] **= -1
+
+            # Apply filler:                 
+            block = block * mask2d[:, None, :]           
+            block += ndimage.filters.gaussian_filter(block, sigma = kernel) * (~mask2d[:, None, :])
+            
+            self._parent.data[ii] = block   
+
+            # Show progress:
+            misc.progress_bar((ii+1) / self._parent.data.block_number)
+            
+        self._parent.meta.history.add_record('process.interpolate_holes(mask2d, kernel)', kernel)
+
+def residual_rings(data, kernel=[3, 1, 3]):
+    '''
+    Apply correction by computing outlayers .
+    '''
+    import ndimage
     
+    # Compute mean image of intensity variations that are < 5x5 pixels
+    print('Our best agents are working on the case of the Residual Rings. This can take years if the kernel size is too big!')
+
+    misc.progress_bar(0)        
+    
+    tmp = numpy.zeros(data.shape[::2])
+    
+    for ii in range(data.shape[1]):                 
+        
+        block = data[:, ii, :]
+
+        # Compute:
+        tmp += (block - ndimage.filters.median_filter(block, size = kernel)).sum(1)
+        
+        misc.progress_bar((ii+1) / data.shape[1])
+        
+    tmp /= data.shape[1]
+    
+    print('Subtract residual rings.')
+    
+    misc.progress_bar(0)        
+    
+    for ii in range(data.shape[1]):                 
+        
+        block = data[:, ii, :]
+        block -= tmp
+
+        misc.progress_bar((ii+1) / data.shape[1])
+        
+        data[:, ii, :] = block 
+    
+    print('Residual ring correcion applied.')
+    return data
+
+def subtract_air(data, air_val = None):
+    '''
+    Subtracts a coeffificient from each projection, that equals to the intensity of air.
+    We are assuming that air will produce highest peak on the histogram.
+    '''
+    print('Air intensity will be derived from 10 pixel wide border.')
+    
+    # Compute air if needed:
+    if air_val is None:  
+        
+        air_val = -numpy.inf
+        
+        for ii in range(data.shape[1]): 
+            # Take pixels that belong to the 5 pixel-wide margin.
+            
+            block = data[:, ii, :]
+
+            border = numpy.concatenate((block[:10, :].ravel(), block[-10:, :].ravel(), block[:, -10:].ravel(), block[:, :10].ravel()))
+          
+            y, x = numpy.histogram(border, 1024, range = [-0.1, 0.1])
+            x = (x[0:-1] + x[1:]) / 2
+    
+            # Subtract maximum argument:    
+            air_val = numpy.max([air_val, x[y.argmax()]])
+    
+    print('Subtracting %f' % air_val)  
+    
+    misc.progress_bar(0)  
+    
+    for ii in range(data.shape[1]):  
+        
+        block = data[:, ii, :]
+
+        block = block - air_val
+        block[block < 0] = 0
+        
+        data[:, ii, :] = block
+
+        misc.progress_bar((ii+1) / data.shape[1])
+        
+    return data
+                    
 def _parabolic_min_(values, index, space):    
     '''
     Use parabolic interpolation to find the extremum close to the index value:

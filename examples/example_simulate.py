@@ -8,6 +8,7 @@ import flexData
 import flexProject
 import flexUtil
 import flexModel
+import flexCompute
 
 import numpy
 
@@ -21,7 +22,9 @@ proj = numpy.zeros([1, 361, 512], dtype = 'float32')
 geometry = flexData.create_geometry(src2obj = 100, det2obj = 100, det_pixel = 0.01, theta_range = [0, 360], theta_count = 361)
 
 # Create phantom and project into proj:
-vol = flexModel.phantom(vol.shape, 'bubble', [150, 15])     
+vol = flexModel.phantom(vol.shape, 'bubble', [150, 15, 1.5])     
+vol = flexCompute.rotate(vol, 10, 0)
+
 flexUtil.display_slice(vol)
 
 # Forward project:
@@ -46,6 +49,6 @@ flexUtil.display_slice(vol_rec)
 vol = numpy.zeros([1, 512, 512], dtype = 'float32')
 
 options = {'bounds':[0, 10], 'l2_update':True, 'block_number':10, 'mode':'random'}
-flexProject.SIRT(proj, vol, geometry, iterations = 40, options = options)
+flexProject.SIRT(proj, vol, geometry, iterations = 10, options = options)
 
 flexUtil.display_slice(vol, title = 'SIRT')

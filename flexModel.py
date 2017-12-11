@@ -11,35 +11,61 @@ This module includes a few routines useful for modeling polychromatic X-ray CT d
 import numpy
 import flexSpectrum
 
-def phantom(shape, mode = 'bubble', parameters = [10, 1]):
+def phantom(shape, mode = 'bubble', parameters = [10, 1, 1]):
     """
     Create a phantom image.
     
     Args:
         shape (list): shape of the volume 
         type (str): use 'bubble' or 'ball'
-        parameters (list or float): for the bubble - [outer radius, wall thickness], pearl - radius
+        parameters (list or float): for the bubble - [outer radius, wall thickness, squeeze], ball - radius, squeeze
     """    
     
     xx = numpy.arange(0, shape[0]) - shape[0] // 2
     yy = numpy.arange(0, shape[1]) - shape[1] // 2
     zz = numpy.arange(0, shape[2]) - shape[2] // 2
-                                  
-    vol = (xx[:, None, None]**2 + yy[None, :, None]**2 + zz[None, None, :]**2)
-
+    
     if mode == 'bubble':
         r0 = (parameters[0] - parameters[1])**2
         r1 = (parameters[0])**2
-    
+        e = parameters[2]
+
+        vol = ((xx[:, None, None]*e)**2 + (yy[None, :, None]/e)**2 + zz[None, None, :]**2)
         vol = numpy.array(((vol > r0) & (vol < r1)), dtype = 'float32')   
               
     elif mode == 'ball':
         r0 = parameters[0] ** 2
+        e = parameters[1]
+
+        vol = ((xx[:, None, None]*e)**2 + (yy[None, :, None]/e)**2 + zz[None, None, :]**2)
         vol = numpy.array((vol < r0), dtype = 'float32') 
+        
+    elif mode == 'checkers':
+        return _checkers_(shape, parameters[0])
         
     else: ValueError('Unknown phantom type!')
 
-    return vol                
+    return vol    
+
+def _checkers_(shape = [256, 256, 256], frequency = 8):
+        
+        vol = numpy.zeros(shape, dtype='bool')
+        
+        step = shape[1] // frequency
+        
+        for ii in range(0, frequency):
+            sl = slice(ii*step, int((ii + 0.5) * step))
+            vol[sl, :, :] = ~vol[sl, :, :]
+        
+        for ii in range(0, frequency):
+            sl = slice(ii*step, int((ii + 0.5) * step))
+            vol[:, sl, :] = ~vol[:, sl, :]
+
+        for ii in range(0, frequency):
+            sl = slice(ii*step, int((ii + 0.5) * step))
+            vol[:, :, sl] = ~vol[:, :, sl]
+ 
+        return numpy.float32(vol)        
 
 def get_ctf(shape, mode = 'gaussian', parameter = 1):
     """

@@ -11,6 +11,7 @@ Displaying and stuff...
 
 import numpy
 import matplotlib.pyplot as plt
+import misc
 
 ''' * Methods * '''
 
@@ -39,15 +40,10 @@ def display_slice(data, index = None, dim = 0, bounds = None, title = None):
     if index is None:
         index = data.shape[dim] // 2
 
-    if dim == 0:
-        img = data[index, :, :]
+    sl = misc.anyslice(data, index, dim)
 
-    elif dim == 1:
-        img = data[:, index, :]
-
-    elif dim == 2:
-        img = data[:, :, index]
-
+    img = data[sl]
+    
     plt.figure()
     if bounds:
         plt.imshow(img, vmin = bounds[0], vmax = bounds[1])

@@ -51,9 +51,3 @@ options = {'bounds':[0, 1000], 'l2_update':True, 'block_number':1, 'index':'sequ
 flexProject.SIRT(proj, vol, meta['geometry'], iterations = 1, options = options)
 
 flexUtil.display_slice(vol, title = 'SIRT')
-
-#%%
-vol = numpy.ones([50, 2000, 2000], dtype = 'float32')
-
-flexProject.backproject(proj, vol, meta['geometry'])
-flexUtil.display_slice(vol, title = 'BP')
