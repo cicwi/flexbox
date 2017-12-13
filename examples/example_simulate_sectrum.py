@@ -4,11 +4,7 @@
 Simulate spectral data with Poisson noise
 """
 #%%
-import flexData
-import flexProject
-import flexUtil
-import flexModel
-import flexSpectrum
+import flexbox as flex
 
 import numpy
 
@@ -23,32 +19,32 @@ src2obj = 100     # mm
 det2obj = 100     # mm   
 det_pixel = 0.2   # mm (100 micron)
 
-geometry = flexData.create_geometry(src2obj, det2obj, det_pixel, [0, 360], 361)
+geometry = flex.data.create_geometry(src2obj, det2obj, det_pixel, [0, 360], 361)
 
 # Create phantom (150 micron wide, 15 micron wall thickness):
-vol = flexModel.phantom(vol.shape, 'ball', [150,])     
-flexProject.forwardproject(proj, vol, geometry)
+vol = flex.model.phantom(vol.shape, 'ball', [150,])     
+flex.project.forwardproject(proj, vol, geometry)
 
 #%% Simulate spectrum:
 
 energy = numpy.linspace(10, 80, 100)
 
 # Tube:
-spectrum = flexSpectrum.bremsstrahlung(energy, 90) 
+spectrum = flex.spectrum.bremsstrahlung(energy, 90) 
 spectrum[20] = 3
 # Filter:
-spectrum *= flexSpectrum.total_transmission(energy, 'Cu', 8, 0.1)
+spectrum *= flex.spectrum.total_transmission(energy, 'Cu', 8, 0.1)
 # Detector:
-spectrum *= flexSpectrum.scintillator_efficiency(energy, 'Si', rho = 5, thickness = 1)
+spectrum *= flex.spectrum.scintillator_efficiency(energy, 'Si', rho = 5, thickness = 1)
 # Normalize:
 spectrum /= (energy*spectrum).sum()
 
 # Get the material refraction index:
-mu = flexSpectrum.linear_attenuation(energy, 'Al', 2.7)
+mu = flex.spectrum.linear_attenuation(energy, 'Al', 2.7)
  
 # Display:
-flexUtil.plot(energy, spectrum, 'Spectrum') 
-flexUtil.plot(energy, mu, 'Linear attenuation') 
+flex.util.plot(energy, spectrum, 'Spectrum') 
+flex.util.plot(energy, mu, 'Linear attenuation') 
 
 #%% Model data:
     
@@ -61,32 +57,32 @@ for ii in range(len(energy)):
     
     # Monochromatic component:
     monochrome = spectrum[ii] * numpy.exp(-proj * mu[ii])
-    monochrome = flexModel.apply_noise(monochrome, 'poisson', n_phot) / n_phot    
+    monochrome = flex.model.apply_noise(monochrome, 'poisson', n_phot) / n_phot    
     
     # Detector response is assumed to be proportional to E
     counts += energy[ii] * monochrome
 
 # Simulate detector blurring:
-ctf = flexModel.get_ctf(counts.shape[::2], 'gaussian', [det_pixel, det_pixel])
-counts = flexModel.apply_ctf(counts, ctf)        
+ctf = flex.model.get_ctf(counts.shape[::2], 'gaussian', [det_pixel, det_pixel])
+counts = flex.model.apply_ctf(counts, ctf)        
 
 # Display:
-flexUtil.display_slice(counts, title = 'Modelled sinogram') 
+flex.util.display_slice(counts, title = 'Modelled sinogram') 
 
 #%% Reconstruct:
     
 vol_rec = numpy.zeros_like(vol)
 proj_0 = -numpy.log(counts)
 
-flexProject.FDK(proj_0, vol_rec, geometry)
-flexUtil.display_slice(vol_rec, title = 'Uncorrected FDK')
+flex.project.FDK(proj_0, vol_rec, geometry)
+flex.util.display_slice(vol_rec, title = 'Uncorrected FDK')
     
 #%% Beam hardening correction: 
 proj_0 = -numpy.log(counts)
 
-energy, spectrum = flexSpectrum.calibrate_spectrum(proj_0, vol_rec, geometry, compound = 'Al', density = 2.7, n_bin = 50)   
-proj_0 = flexSpectrum.equivalent_density(proj_0, geometry, energy, spectrum, compound = 'Al', density = 2.7) 
+energy, spectrum = flex.spectrum.calibrate_spectrum(proj_0, vol_rec, geometry, compound = 'Al', density = 2.7, n_bin = 50)   
+proj_0 = flex.spectrum.equivalent_density(proj_0, geometry, energy, spectrum, compound = 'Al', density = 2.7) 
 
-flexProject.FDK(proj_0, vol_rec, geometry)
-flexUtil.display_slice(vol_rec, title = 'Corrected FDK')
+flex.project.FDK(proj_0, vol_rec, geometry)
+flex.util.display_slice(vol_rec, title = 'Corrected FDK')
     
