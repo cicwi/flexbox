@@ -7,11 +7,12 @@ Created on Thu Nov 2017
 This module contains calculation routines for pre/post processing.
 """
 import numpy
-import flexUtil
-import flexData
-import flexProject
 from scipy import ndimage
-import misc
+
+from . import flexUtil
+from . import flexData
+from . import flexProject
+from . import misc
 
 def rotate(data, angle, axis = 0):
     '''

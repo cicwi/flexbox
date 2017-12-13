@@ -11,7 +11,8 @@ Displaying and stuff...
 
 import numpy
 import matplotlib.pyplot as plt
-import misc
+
+from . import misc
 
 ''' * Methods * '''
 

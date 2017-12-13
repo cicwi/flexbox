@@ -9,7 +9,7 @@ This module includes a few routines useful for modeling polychromatic X-ray CT d
 
 """
 import numpy
-import flexSpectrum
+from . import flexSpectrum
 
 def phantom(shape, mode = 'bubble', parameters = [10, 1, 1]):
     """

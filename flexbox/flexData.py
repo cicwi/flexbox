@@ -17,10 +17,11 @@ We can now read/write:
 import numpy
 import os
 import re
-import misc
 import astra 
 import transforms3d
 import transforms3d.euler
+
+from . import misc
 
 ''' * Methods * '''
 
