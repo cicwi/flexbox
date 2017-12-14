@@ -36,9 +36,7 @@ def read_flexray(path):
         proj (numpy.array): projections stack
         flat (numpy.array): reference flat field images
         dark (numpy.array): dark field images   
-        geom (dict): description of the deometry 
-        phys (dict): description of the physical settings
-        lyric (dict): comments
+        meta (dict): result from `read_log`
     '''
     dark = read_raw(path, 'di')
     
@@ -46,9 +44,9 @@ def read_flexray(path):
     
     proj = read_raw(path, 'scan_')
     
-    geom, phys, lyric = read_log(path, 'flexray')   
+    meta = read_log(path, 'flexray')   
     
-    return proj, flat, dark, geom, phys, lyric
+    return proj, flat, dark, meta
         
 def read_raw(path, name, skip = 1, sample = 1, x_roi = [], y_roi = [], dtype = 'float32', disk_map = None):
     """
@@ -163,9 +161,10 @@ def read_log(path, name, log_type = 'flexray'):
         log_type (bool): type of the log file
         
     Returns:    
-        geometry : src2obj, det2obj, det_pixel, thetas, det_hrz, det_vrt, det_mag, det_rot, src_hrz, src_vrt, src_mag, axs_hrz, vol_hrz, vol_vrt, vol_mag, vol_rot
-        settings : physical settings - voltage, current, exposure
-        description : lyrical description of the data
+        meta (dict): dictionary with fields
+            - geometry : src2obj, det2obj, det_pixel, thetas, det_hrz, det_vrt, det_mag, det_rot, src_hrz, src_vrt, src_mag, axs_hrz, vol_hrz, vol_vrt, vol_mag, vol_rot
+            - settings : physical settings - voltage, current, exposure
+            - description : lyrical description of the data
     """
     
     if log_type != 'flexray': raise ValueError('Non-flexray log files are not supported yet. File a complaint form to the support team.')
@@ -460,7 +459,7 @@ def _get_flexray_keywords_():
                     
                     'exposure time (ms)':'exposure'}
 
-    description =  {'Sample name' : 'comments',
+    description =  {'sample name' : 'comments',
                     'Comment' : 'name',                    
 
                     'date':'date'}
@@ -552,7 +551,7 @@ def _interpret_record_(name, var, keywords, output):
         factor = _parse_unit_(name)
 
         if geom_key[0] in output:
-            print('WARNING! Geometry record found twice in the log file!')
+            print('WARNING! Geometry record `', geom_key[0], '` found twice in the log file!')
             
         # If needed to separate the var and save the number of save the whole string:   
         try:
