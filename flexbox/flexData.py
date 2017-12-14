@@ -25,7 +25,7 @@ from . import misc
 
 ''' * Methods * '''
 
-def read_flexray(self, path):
+def read_flexray(path):
     '''
     Read raw projecitions, dark and flat-field, scan parameters from FlexRay
     
