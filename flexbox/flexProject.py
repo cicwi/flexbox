@@ -10,16 +10,16 @@ This module some wrappers around ASTRA to make lives of people slightly less hor
 ''' * Imports * '''
 
 import numpy
-import misc
 import astra
 import astra.experimental as asex 
 import sys
 import matplotlib.pyplot as plt
 import random
 
-import flexUtil
-import flexData
-import flexModel
+from . import flexUtil
+from . import flexData
+from . import flexModel
+from . import misc
 
 ''' * Methods * '''
 

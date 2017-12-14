@@ -17,7 +17,7 @@ import xraylib
 import matplotlib.pyplot as plt
 
 import odl    # Is used for phantom creation.
-import reconstruction
+from . import reconstruction
 
 class spectra():
     '''
