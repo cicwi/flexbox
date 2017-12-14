@@ -7,10 +7,13 @@ Test flex.data module.
 import flexbox as flex
 import numpy
 import astra
+import sys
 
 #%% Read
-
-path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/'
+if len(sys.argv) == 1:
+    print("USAGE: python", sys.argv[0], "<path to data>")
+    exit(-1)
+path = sys.argv[1]
 
 dark = flex.data.read_raw(path, 'di')
 flat = flex.data.read_raw(path, 'io')    
@@ -36,9 +39,8 @@ vol_geom = flex.data.astra_vol_geom(meta['geometry'], vol.shape)
 proj_geom = flex.data.astra_proj_geom(meta['geometry'], proj.shape[::2])
         
 # This is ASTRAAA!!!
-sin_id = astra.data3d.link('-sino', proj_geom, proj)
-
-vol_id = astra.data3d.link('-vol', vol_geom, vol)
+sin_id = astra.data3d.link('-sino', proj_geom, numpy.ascontiguousarray(proj))
+vol_id = astra.data3d.link('-vol', vol_geom, numpy.ascontiguousarray(vol))
 
 cfg = astra.astra_dict('FDK_CUDA')
 cfg['ReconstructionDataId'] = vol_id
