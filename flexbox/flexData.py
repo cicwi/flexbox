@@ -21,7 +21,7 @@ import astra
 import transforms3d
 import transforms3d.euler
 
-from . import misc
+from . import flexUtil
 
 ''' * Methods * '''
 
@@ -36,7 +36,9 @@ def read_flexray(path):
         proj (numpy.array): projections stack
         flat (numpy.array): reference flat field images
         dark (numpy.array): dark field images   
-        meta (dict): result from `read_log`
+        geom (dict): description of the deometry 
+        phys (dict): description of the physical settings
+        lyric (dict): comments
     '''
     dark = read_raw(path, 'di')
     
@@ -44,11 +46,11 @@ def read_flexray(path):
     
     proj = read_raw(path, 'scan_')
     
-    meta = read_log(path, 'flexray')   
+    geom, phys, lyric = read_log(path, 'flexray')   
     
-    return proj, flat, dark, meta
+    return proj, flat, dark, geom, phys, lyric
         
-def read_raw(path, name, skip = 1, sample = 1, x_roi = [], y_roi = [], dtype = 'float32', disk_map = None):
+def read_raw(path, name, skip = 1, sample = [1, 1], x_roi = [], y_roi = [], dtype = 'float32', disk_map = None):
     """
     Read tiff files stack and return numpy array.
     
@@ -60,7 +62,7 @@ def read_raw(path, name, skip = 1, sample = 1, x_roi = [], y_roi = [], dtype = '
         x_roi ([x0, x1]): horizontal range
         y_roi ([y0, y1]): vertical range
         dtype (str or numpy.dtype): data type to return
-        disk_map (bool): if true, return a disk mapped array to save RAM
+        disk_map (str): if provided, return a disk mapped array to save RAM
         
     Returns:
         numpy.array : 3D array with the first dimension representing the image index
@@ -97,7 +99,7 @@ def read_raw(path, name, skip = 1, sample = 1, x_roi = [], y_roi = [], dtype = '
           
         data[ii, :, :] = a
 
-        misc.progress_bar((ii+1) / (numpy.shape(files)[0] // skip))
+        flexUtil.progress_bar((ii+1) / (numpy.shape(files)[0] // skip))
 
     print('%u files were loaded.' % file_n)
 
@@ -131,17 +133,17 @@ def write_raw(path, name, data, dim = 1, dtype = None):
         path_name = os.path.join(path, name + '_%06u.tiff'%ii)
         
         # Extract one slice from the big array
-        sl = misc.anyslice(data, ii, dim)
+        sl = flexUtil.anyslice(data, ii, dim)
         img = data[sl]
           
         # Cast data to another type if needed
         if dtype is not None:
-            img = misc.cast2type(img, dtype, bounds)
+            img = flexUtil.cast2type(img, dtype, bounds)
         
         # Write it!!!
         imageio.imwrite(path_name, img)
         
-        misc.progress_bar((ii+1) / file_num)
+        flexUtil.progress_bar((ii+1) / file_num)
         
 def write_tiff(filename, image):
     """
@@ -149,9 +151,14 @@ def write_tiff(filename, image):
     """ 
     import imageio
     
+    # Make path if does not exist:
+    path = os.path.dirname(filename)
+    if not os.path.exists(path):
+        os.makedirs(path)
+    
     imageio.imwrite(filename, image)           
         
-def read_log(path, name, log_type = 'flexray'):
+def read_log(path, name, log_type = 'flexray', bins = 1):
     """
     Read the log file and return dictionaries with parameters of the scan.
     
@@ -159,12 +166,12 @@ def read_log(path, name, log_type = 'flexray'):
         path (str): path to the files location
         name (str): common part of the files name
         log_type (bool): type of the log file
+        bins: forced binning in [y, x] direction
         
     Returns:    
-        meta (dict): dictionary with fields
-            - geometry : src2obj, det2obj, det_pixel, thetas, det_hrz, det_vrt, det_mag, det_rot, src_hrz, src_vrt, src_mag, axs_hrz, vol_hrz, vol_vrt, vol_mag, vol_rot
-            - settings : physical settings - voltage, current, exposure
-            - description : lyrical description of the data
+        geometry : src2obj, det2obj, det_pixel, thetas, det_hrz, det_vrt, det_mag, det_rot, src_hrz, src_vrt, src_mag, axs_hrz, vol_hrz, vol_vrt, vol_mag, vol_rot
+        settings : physical settings - voltage, current, exposure
+        description : lyrical description of the data
     """
     
     if log_type != 'flexray': raise ValueError('Non-flexray log files are not supported yet. File a complaint form to the support team.')
@@ -192,13 +199,17 @@ def read_log(path, name, log_type = 'flexray'):
                     geometry[key][ii] = 0
                 
         elif geometry[key] is None: geometry[key] = 0  
+
+    # Apply binning if needed:
+    geometry['det_pixel'] *= bins
+    geometry['img_pixel'] *= bins
         
     # Create a meta record:
     meta = {'geometry':geometry, 'settings':settings, 'description':description}    
     
     return meta
 
-def write_meta(file_path, meta):
+def write_meta(filename, meta):
     """
     Read
     
@@ -209,17 +220,27 @@ def write_meta(file_path, meta):
     
     import toml
     
+    # Make path if does not exist:
+    path = os.path.dirname(filename)
+    if not os.path.exists(path):
+        os.makedirs(path)
+    
     # Save TOML to a file:
-    with open(file_path, 'w') as f:
+    with open(filename, 'w') as f:
         toml.dump(meta, f)
         
-def write_astra(file_path, data_shape, meta):
+def write_astra(filename, data_shape, meta):
     """
     Write an astra-readable projection geometry vector.
     """        
     geom = astra_proj_geom(meta['geometry'], data_shape)
     
-    numpy.savetxt(file_path, geom['Vectors']) 
+    # Make path if does not exist:
+    path = os.path.dirname(filename)
+    if not os.path.exists(path):
+        os.makedirs(path)
+    
+    numpy.savetxt(filename, geom['Vectors']) 
     
 def read_meta(file_path):
     """
@@ -407,8 +428,120 @@ def create_geometry(src2obj, det2obj, det_pixel, theta_range, theta_count):
     geometry['thetas'] = numpy.linspace(theta_range[0], theta_range[1], theta_count, dtype = 'float32') 
 
     return geometry 
+        
+def detector_size(shape, geometry):
+    '''
+    Get the size of detector in mm.
+    '''       
+    return geometry['det_pixel'] * numpy.array(shape)
 
-def _read_tiff_(file, sample = 1, x_roi = [], y_roi = []):
+def detector_bounds(shape, geometry):
+    '''
+    Get the boundaries of the detector in mm
+    '''   
+    bounds = {}
+
+    xmin = geometry['det_hrz'] - geometry['det_pixel'] * shape[2] / 2
+    xmax = geometry['det_hrz'] + geometry['det_pixel'] * shape[2] / 2
+
+    ymin = geometry['det_vrt'] - geometry['det_pixel'] * shape[0] / 2
+    ymax = geometry['det_vrt'] + geometry['det_pixel'] * shape[0] / 2
+
+    bounds['hrz'] = [xmin, xmax]
+    bounds['vrt'] = [ymin, ymax]
+    
+    return bounds 
+
+    
+def tiles_shape(shape, geometry_list):
+    """
+    Compute the size of the stiched dataset.
+    Args:
+        shape: shape of a single projection stack.
+        geometry_list: list of geometries.
+        
+    """
+    # Phisical detector size:
+    min_x, min_y = numpy.inf, numpy.inf
+    max_x, max_y = -numpy.inf, -numpy.inf
+    
+    det_pixel = geometry_list[0]['det_pixel']
+    
+    # Find out the size required for the final dataset
+    for geo in geometry_list:
+        
+        bounds = detector_bounds(shape, geo)
+        
+        min_x = min([min_x, bounds['hrz'][0]])
+        min_y = min([min_y, bounds['vrt'][0]])
+        max_x = max([max_x, bounds['hrz'][1]])
+        max_y = max([max_y, bounds['vrt'][1]])
+        
+    # Big slice:
+    new_shape = numpy.array([(max_y - min_y) / det_pixel, shape[1], (max_x - min_x) / det_pixel])                     
+    new_shape = numpy.int32(numpy.ceil(new_shape))  
+    
+    # Copy one of the geometry records and sett the correct translation:
+    geometry = geometry_list[0].copy()
+    
+    geometry['det_hrz'] = (max_x + min_x) / 2
+    geometry['det_vrt'] = (max_y + min_y) / 2
+    
+    return new_shape, geometry
+    
+def append_tile(data, geom, tot_data, tot_geom):
+    """
+    Append a tile to a larger dataset.
+    Args:
+        
+        data: projection stack
+        geom: geometry descritption
+        tot_data: output array
+        tot_geom: output geometry
+        
+    """ 
+    
+    import scipy.ndimage.interpolation as interp
+
+    print('Stitching a tile...')               
+    
+    # Assuming all projections have equal number of angles and same pixel sizes
+    total_shape = tot_data.shape[::2]
+    det_shape = data.shape[::2]
+    
+    total_size = detector_size(total_shape, tot_geom)
+    det_size = detector_size(det_shape, geom)
+                    
+    # Offset from the left top corner:
+    x0 = tot_geom['det_hrz']
+    y0 = tot_geom['det_vrt']
+    
+    x = geom['det_hrz']
+    y = geom['det_vrt']
+        
+    x_offset = ((x - x0) + total_size[1] / 2 - det_size[1] / 2) / geom['det_pixel']
+    y_offset = ((y - y0) + total_size[0] / 2 - det_size[0] / 2) / geom['det_pixel']
+    
+    # Pad image to get the same size as the total_slice:        
+    pad_x = tot_data.shape[2] - data.shape[2]
+    pad_y = tot_data.shape[0] - data.shape[0]  
+    
+    flexUtil.progress_bar(0)    
+    
+    for ii in range(tot_data.shape[1]):   
+        
+        # Pad to match sizes:
+        proj = numpy.pad(data[:, ii, :], ((0, pad_y), (0, pad_x)), mode = 'constant')  
+        
+        # Apply shift:
+        proj = interp.shift(proj, [y_offset, x_offset], order = 1)
+        
+        # Add:
+        tot_data[:, ii, :] = numpy.max((proj, tot_data[:, ii, :]), 0)
+        
+        flexUtil.progress_bar((ii+1) / tot_data.shape[1])
+             
+def _read_tiff_(file, sample = [1, 1], x_roi = [], y_roi = []):
     """
     Read a single image.
     """
@@ -424,7 +557,7 @@ def _read_tiff_(file, sample = 1, x_roi = [], y_roi = []):
         im = im[:, x_roi[0]:x_roi[1]]
 
     if sample != 1:
-        im = im[::sample, ::sample]
+        im = im[::sample[0], ::sample[1]]
     
     return im
 
@@ -459,7 +592,7 @@ def _get_flexray_keywords_():
                     
                     'exposure time (ms)':'exposure'}
 
-    description =  {'sample name' : 'comments',
+    description =  {'Sample name' : 'comments',
                     'Comment' : 'name',                    
 
                     'date':'date'}
@@ -551,7 +684,7 @@ def _interpret_record_(name, var, keywords, output):
         factor = _parse_unit_(name)
 
         if geom_key[0] in output:
-            print('WARNING! Geometry record `', geom_key[0], '` found twice in the log file!')
+            print('WARNING! Geometry record found twice in the log file!')
             
         # If needed to separate the var and save the number of save the whole string:   
         try:
@@ -602,7 +735,7 @@ def _get_files_sorted_(path, name):
     # Sort files using keys:
     files = [f for (k, f) in sorted(zip(keys, files))]
 
-    return files    
+    return files 
     
     
     

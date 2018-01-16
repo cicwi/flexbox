@@ -12,7 +12,6 @@ from scipy import ndimage
 from . import flexUtil
 from . import flexData
 from . import flexProject
-from . import misc
 
 def rotate(data, angle, axis = 0):
     '''
@@ -21,17 +20,17 @@ def rotate(data, angle, axis = 0):
     
     print('Applying rotation.')
     
-    misc.progress_bar(0)  
+    flexUtil.progress_bar(0)  
     
     sz = data.shape[axis]
     
     for ii in range(sz):     
         
-        sl = misc.anyslice(data, ii, axis)
+        sl = flexUtil.anyslice(data, ii, axis)
         
         data[sl] = ndimage.interpolation.rotate(data[sl], angle, reshape=False)
         
-        misc.progress_bar((ii+1) / sz)
+        flexUtil.progress_bar((ii+1) / sz)
         
     return data
         
@@ -42,17 +41,17 @@ def translate(data, shift, axis = 0):
     
     print('Applying translation.')
     
-    misc.progress_bar(0)  
+    flexUtil.progress_bar(0)  
     
     sz = data.shape[axis]
     
     for ii in range(sz):     
         
-        sl = misc.anyslice(data, ii, axis)
+        sl = flexUtil.anyslice(data, ii, axis)
         
         data[sl] = ndimage.interpolation.shift(data[sl], shift, order = 1, reshape=False)
         
-        misc.progress_bar((ii+1) / sz)   
+        flexUtil.progress_bar((ii+1) / sz)   
 
     return data
     
@@ -124,7 +123,7 @@ def moment(data, power, dim, centered = True):
             mask2d: holes are zeros. Mask is the same for all projections.
         '''
         
-        misc.progress_bar(0)        
+        flexUtil.progress_bar(0)        
         for ii, block in enumerate(self._parent.data):    
                     
             # Compute the filler:
@@ -138,7 +137,7 @@ def moment(data, power, dim, centered = True):
             self._parent.data[ii] = block   
 
             # Show progress:
-            misc.progress_bar((ii+1) / self._parent.data.block_number)
+            flexUtil.progress_bar((ii+1) / self._parent.data.block_number)
             
         self._parent.meta.history.add_record('process.interpolate_holes(mask2d, kernel)', kernel)
 
@@ -151,7 +150,7 @@ def residual_rings(data, kernel=[3, 1, 3]):
     # Compute mean image of intensity variations that are < 5x5 pixels
     print('Our best agents are working on the case of the Residual Rings. This can take years if the kernel size is too big!')
 
-    misc.progress_bar(0)        
+    flexUtil.progress_bar(0)        
     
     tmp = numpy.zeros(data.shape[::2])
     
@@ -162,20 +161,20 @@ def residual_rings(data, kernel=[3, 1, 3]):
         # Compute:
         tmp += (block - ndimage.filters.median_filter(block, size = kernel)).sum(1)
         
-        misc.progress_bar((ii+1) / data.shape[1])
+        flexUtil.progress_bar((ii+1) / data.shape[1])
         
     tmp /= data.shape[1]
     
     print('Subtract residual rings.')
     
-    misc.progress_bar(0)        
+    flexUtil.progress_bar(0)        
     
     for ii in range(data.shape[1]):                 
         
         block = data[:, ii, :]
         block -= tmp
 
-        misc.progress_bar((ii+1) / data.shape[1])
+        flexUtil.progress_bar((ii+1) / data.shape[1])
         
         data[:, ii, :] = block 
     
@@ -209,7 +208,7 @@ def subtract_air(data, air_val = None):
     
     print('Subtracting %f' % air_val)  
     
-    misc.progress_bar(0)  
+    flexUtil.progress_bar(0)  
     
     for ii in range(data.shape[1]):  
         
@@ -220,7 +219,7 @@ def subtract_air(data, air_val = None):
         
         data[:, ii, :] = block
 
-        misc.progress_bar((ii+1) / data.shape[1])
+        flexUtil.progress_bar((ii+1) / data.shape[1])
         
     return data
                     
@@ -336,5 +335,44 @@ def optimize_rotation_center(projections, geometry, guess = None, subscale = 1, 
     
     return guess
 
+def process_flex(path, options = {'bin':1, 'disk_map': None}):
+    '''
+    Read and process the data.
+    
+    Args:
+        path:  path to the flexray data
+        options: dictionary of options, such as bin (binning), disk_map (use disk_map to save RAM)
+        
+    Return:
+        proj: min-log projections
+        meta: meta data
+        
+    '''
+    
+    bins = options['bin']
+    disk_map = options['disk_map']
+    
+    # Read:    
+    print('Reading...')
+    
+    dark = flexData.read_raw(path, 'di', sample = [bins, bins])
+    flat = flexData.read_raw(path, 'io', sample = [bins, bins])    
+    
+    proj = flexData.read_raw(path, 'scan_', skip = bins, sample = [bins, bins], disk_map = disk_map)
 
+    meta = flexData.read_log(path, 'flexray', bins = bins)   
+    
+    # Prepro:
+    print('Processing...')
+    proj -= dark
+    proj /= (flat.mean(0) - dark)
+        
+    numpy.log(proj, out = proj)
+    proj *= -1
+        
+    proj = flexData.raw2astra(proj)    
+    
+    flexUtil.display_slice(proj)
+        
+    return proj, meta
 

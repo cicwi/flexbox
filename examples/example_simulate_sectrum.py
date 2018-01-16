@@ -22,7 +22,7 @@ det_pixel = 0.2   # mm (100 micron)
 geometry = flex.data.create_geometry(src2obj, det2obj, det_pixel, [0, 360], 361)
 
 # Create phantom (150 micron wide, 15 micron wall thickness):
-vol = flex.model.phantom(vol.shape, 'ball', [150,])     
+vol = flex.model.phantom(vol.shape, 'ball', [150,1])     
 flex.project.forwardproject(proj, vol, geometry)
 
 #%% Simulate spectrum:

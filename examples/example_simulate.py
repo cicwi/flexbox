@@ -36,14 +36,14 @@ flex.util.display_slice(vol_rec)
 #%% EM
 vol_rec = numpy.zeros_like(vol)
 
-options = {'bounds':[0, 10], 'l2_update':True, 'block_number':10, 'mode':'random'}
-flex.project.EM(proj, vol_rec, geometry, iterations = 10, options = options)
+options = {'bounds':[0, 10], 'l2_update':True, 'block_number':5, 'mode':'random'}
+flex.project.EM(proj, vol_rec, geometry, iterations = 20, options = options)
 flex.util.display_slice(vol_rec)
 
 #%% SIRT
 vol = numpy.zeros([1, 512, 512], dtype = 'float32')
 
-options = {'bounds':[0, 10], 'l2_update':True, 'block_number':10, 'mode':'random'}
-flex.project.SIRT(proj, vol, geometry, iterations = 10, options = options)
+options = {'bounds':[0, 10], 'l2_update':True, 'block_number':20, 'mode':'random'}
+flex.project.SIRT(proj, vol, geometry, iterations = 20, options = options)
 
 flex.util.display_slice(vol, title = 'SIRT')

@@ -230,3 +230,4 @@ def apply_noise(image, mode = 'poisson', parameter = 1):
         
     else: 
         raise ValueError('Me not recognize the mode! Use normal or poisson!')
+

@@ -19,7 +19,6 @@ import random
 from . import flexUtil
 from . import flexData
 from . import flexModel
-from . import misc
 
 ''' * Methods * '''
 
@@ -199,6 +198,9 @@ def sample_FDK(projections, geometry, sample):
     
     _backproject_block_(projections_, volume, proj_geom, vol_geom, 'FDK_CUDA')
     
+    # Apply correct scaling:
+    volume /= geometry['img_pixel']**3     
+    
     return volume
     
 def FDK(projections, volume, geometry):
@@ -206,12 +208,15 @@ def FDK(projections, volume, geometry):
     FDK
     """
     # Make sure array is contiguous (if not memmap):
-    misc.progress_bar(0)    
+    flexUtil.progress_bar(0)    
     
     # Yeeey!
     backproject(projections, volume, geometry, 'FDK_CUDA')
     
-    misc.progress_bar(1) 
+    # Apply correct scaling:
+    volume /= geometry['img_pixel']**3     
+    
+    flexUtil.progress_bar(1) 
     
 def _block_index_(ii, block_number, length, mode = None):
     """
@@ -375,10 +380,12 @@ def _em_step_(projections, prj_weight, volume, geometry, options):
         # Compute residual:        
         synth[synth < 1e-12] = numpy.inf  
         synth = (block / synth)
-            
+                    
         # L2 norm (use the last block to update):
         if options.get('l2_update'):
-            l2 = (numpy.sqrt((synth ** 2).mean()))
+            #l2 = (numpy.sqrt(((synth) ** 2).mean()))
+            _synth = synth[synth > 0]
+            l2 = _synth.std()
             
         else:
             l2 = [] 
@@ -410,7 +417,7 @@ def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight':
 
     print('Doing SIRT`y things...')
     
-    misc.progress_bar(0)
+    flexUtil.progress_bar(0)
         
     for ii in range(iterations):
     
@@ -422,7 +429,7 @@ def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight':
         if options.get('preview'):
             flexUtil.display_slice(volume, dim = 0)
             
-        misc.progress_bar((ii+1) / iterations)
+        flexUtil.progress_bar((ii+1) / iterations)
         
     if options.get('l2_update'):   
 
@@ -451,7 +458,7 @@ def EM(projections, volume, geometry, iterations, options = {'preview':False, 'b
             
     print('Em Emm Emmmm...')
     
-    misc.progress_bar(0)
+    flexUtil.progress_bar(0)
         
     for ii in range(iterations):
 
@@ -469,7 +476,7 @@ def EM(projections, volume, geometry, iterations, options = {'preview':False, 'b
         if options.get('preview'):
             flexUtil.display_slice(volume, dim = 0)
                         
-        misc.progress_bar((ii+1) / iterations)
+        flexUtil.progress_bar((ii+1) / iterations)
         
     if options.get('l2_update'):
 
