@@ -10,32 +10,13 @@ import flexbox as flex
 
 import numpy
 import gc
-
-#%% Define things:
-    
-# Define path:    
-paths_a = []
-paths_b = []
-paths_c = []
-
-paths_a.append('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/t1')
-paths_a.append('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/t2')
-output_path_a = '/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/vol_0'
-
-paths_b.append('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/t3')
-paths_b.append('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/t4')
-output_path_b = '/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/vol_1'
-
-paths_c.append('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/t5')
-paths_c.append('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/t6')
-output_path_c = '/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/vol_2'
-
+        
+#%% Read, process, merge, reconstruct data:
 
 # Load data needed for beam hardening correction:
 energy, spec = numpy.loadtxt('/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_1mm_brass/spectrum.txt')
-        
-#%% Read, process, merge, reconstruct data:
- 
+    
+    
 def merge_projections(input_paths):
     '''
     Merge datasets and reconstruct the total:
@@ -82,37 +63,19 @@ def merge_projections(input_paths):
 
 #%% Reconstruct:
     
-# A
+# Define path:    
+paths = []
 
-total, meta = merge_projections(paths_a)
+paths.append('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/t3')
+paths.append('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/t4')
+output_path = '/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/vol_1'
+
+total, meta = merge_projections(paths)
   
 vol = numpy.zeros([760, 1800, 1800], dtype = 'float32')
 flex.project.FDK(total, vol, meta['geometry'])
 
 # Save reconstruction:    
 vol = flex.util.cast2type(vol, 'uint8', [0, 10])
-flex.data.write_raw(output_path_a, 'vol', vol, dim = 0)
-flex.data.write_meta(output_path_a + 'meta.toml', meta)    
-
-# B
-    
-total, tot_geom = merge_projections(paths_b)
-
-vol *= 0 
-flex.project.FDK(total, vol, meta['geometry'])
-
-vol = flex.util.cast2type(vol, 'uint8', [0, 10])
-flex.data.write_raw(output_path_b, 'vol', vol, dim = 0)
-flex.data.write_meta(output_path_b + 'meta.toml', meta)    
-
-# C    
-
-total, tot_geom = merge_projections(paths_c)
-
-vol *= 0 
-flex.project.FDK(total, vol, meta['geometry'])
-
-vol = flex.util.cast2type(vol, 'uint8', [0, 10])
-flex.data.write_raw(output_path_c, 'vol', vol, dim = 0)
-flex.data.write_meta(output_path_c + 'meta.toml', meta)    
-    
+flex.data.write_raw(output_path, 'vol', vol, dim = 0)
+flex.data.write_meta(output_path + 'meta.toml', meta)    

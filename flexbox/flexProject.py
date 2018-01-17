@@ -199,7 +199,7 @@ def sample_FDK(projections, geometry, sample):
     _backproject_block_(projections_, volume, proj_geom, vol_geom, 'FDK_CUDA')
     
     # Apply correct scaling:
-    volume /= geometry['img_pixel']**3     
+    volume /= geometry['img_pixel']**4     
     
     return volume
     
@@ -214,7 +214,7 @@ def FDK(projections, volume, geometry):
     backproject(projections, volume, geometry, 'FDK_CUDA')
     
     # Apply correct scaling:
-    volume /= geometry['img_pixel']**3     
+    volume /= geometry['img_pixel']**4     
     
     flexUtil.progress_bar(1) 
     
@@ -397,8 +397,8 @@ def _em_step_(projections, prj_weight, volume, geometry, options):
     if options.get('bounds') is not None:
         numpy.clip(volume, a_min = options['bounds'][0], a_max = options['bounds'][1], out = volume) 
 
-    return l2       
-    
+    return l2    
+           
 def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight': False, 'l2_update': True, 'preview':False, 'bounds':None, 'block_number':1, 'index':'sequential', 'ctf': None}):
     """
     SIRT
@@ -436,7 +436,51 @@ def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight':
          plt.figure(15)
          plt.plot(l2)
          plt.title('Residual L2')    
+
+def SIRT_tiled(projections, volume, geometries, iterations, options = {'poisson_weight': False, 'l2_update': True, 'preview':False, 'bounds':None, 'block_number':1, 'index':'sequential', 'ctf': None}):
+    """
+    SIRT: tiled version.
+    """ 
     
+    # Make sure array is contiguous (if not memmap):
+    # if not isinstance(projections, numpy.memmap):
+    #    projections = numpy.ascontiguousarray(projections)        
+    
+    # Initialize L2:
+    l2 = []
+
+    print('Doing SIRT`y things...')
+    
+    flexUtil.progress_bar(0)
+        
+    for ii in range(iterations):
+        
+        l2_ = 0
+        for ii, proj in enumerate(projections):
+            
+            geom = geometries[ii]
+
+            m = (geom['src2obj'] + geom['det2obj']) / geom['src2obj']
+            prj_weight = 1 / (proj.shape[1] * (geom['det_pixel'] / m) ** 4 * max(volume.shape))
+    
+            # Update volume:
+            l2_ += _L2_step_(proj, prj_weight, volume, geom, options)
+            
+        l2.append(l2_)
+                    
+        # Preview
+        if options.get('preview'):
+            flexUtil.display_slice(volume, dim = 0)
+            
+        flexUtil.progress_bar((ii+1) / iterations)
+        
+    if options.get('l2_update'):   
+
+         plt.figure(15)
+         plt.plot(l2)
+         plt.title('Residual L2')    
+         
+         
 def EM(projections, volume, geometry, iterations, options = {'preview':False, 'bounds':None, 'block_number':1, 'index':'sequential', 'l2_update': True}):
     """
     Expectation Maximization

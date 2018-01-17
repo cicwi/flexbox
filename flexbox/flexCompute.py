@@ -361,6 +361,7 @@ def process_flex(path, options = {'bin':1, 'disk_map': None}):
     proj = flexData.read_raw(path, 'scan_', skip = bins, sample = [bins, bins], disk_map = disk_map)
 
     meta = flexData.read_log(path, 'flexray', bins = bins)   
+    meta['geometry']['thetas'] = meta['geometry']['thetas'][::bins]
     
     # Prepro:
     print('Processing...')

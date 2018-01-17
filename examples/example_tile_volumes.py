@@ -44,9 +44,7 @@ def merge_volumes(path, tile, num):
         indexes.append(index)  
         
     for ii in range(0, numpy.max(indexes)):
-        
-        print('Looking for:', ii)
-        
+                
         slices = []
     
         # Loop over volumes:
@@ -85,12 +83,7 @@ def merge_volumes(path, tile, num):
             flex.data.write_tiff(filename, img)        
 
     
-#%% Merge:
-input_paths = []   
-input_paths.append('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/FDK_1')
-input_paths.append('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/FDK_2')  
-input_paths.append('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/FDK_3')  
-    
-merge_volumes(input_paths, 'vol_%u/', 3)      
+#%% Merge:    
+merge_volumes('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/', 'vol_%u/', 3)      
 
     

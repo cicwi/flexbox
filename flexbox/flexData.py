@@ -423,7 +423,12 @@ def create_geometry(src2obj, det2obj, det_pixel, theta_range, theta_count):
     'src_hrz':0., 'src_vrt':0., 'src_mag':0., 'axs_hrz':0., 'det_rot':0., 
     'vol_rot':[0. ,0. ,0.], 'vol_hrz':0., 'vol_vrt':0., 'vol_mag':0.,
     'src2obj': src2obj, 'det2obj':det2obj, 'unit':'millimetre', 'type':'flex', 'binning': 1}
- 
+    
+    # Add img_pixel:
+    if src2obj != 0:    
+        m = (src2obj + det2obj) / src2obj
+        geometry['img_pixel'] = det_pixel / m
+
     # Generate thetas explicitly:
     geometry['thetas'] = numpy.linspace(theta_range[0], theta_range[1], theta_count, dtype = 'float32') 
 
@@ -608,11 +613,8 @@ def _correct_flex_(records):
     records['det2obj'] = records.get('src2det') - records.get('src2obj')    
     records['img_pixel'] = records.get('img_pixel') * _parse_unit_('[um]') 
     
-    records['det_hrz'] += 24
-    
+    records['det_hrz'] += 24    
     records['src_vrt'] -= 5
-    vol_center = (records['det_vrt'] + records['src_vrt']) / 2
-    records['vol_vrt'] = vol_center
 
     # Rotation axis:
     records['axs_hrz'] -= 0.5
@@ -622,8 +624,11 @@ def _correct_flex_(records):
     centre = [(roi[0] + roi[2]) // 2 - 971, (roi[1] + roi[3]) // 2 - 767]
     
     # Take into account the ROI of the detector:
-    records['det_vrt'] += centre[1] / records.get('binning')
-    records['det_hrz'] += centre[0] / records.get('binning')
+    records['det_vrt'] -= centre[1] / records.get('binning')
+    records['det_hrz'] -= centre[0] / records.get('binning')
+    
+    vol_center = (records['det_vrt'] + records['src_vrt']) / 2
+    records['vol_vrt'] = vol_center
     
     maginfication = (records['det2obj'] + records['src2obj']) / records['src2obj']
 
@@ -683,8 +688,11 @@ def _interpret_record_(name, var, keywords, output):
         # Look for unit description in the name:
         factor = _parse_unit_(name)
 
-        if geom_key[0] in output:
-            print('WARNING! Geometry record found twice in the log file!')
+        #if geom_key[0] in output:
+        #    print('*: ', geom_key[0])
+        #    print('**: ', output)
+        #    
+        #    print('WARNING! Geometry record found twice in the log file!')
             
         # If needed to separate the var and save the number of save the whole string:   
         try:

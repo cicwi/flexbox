@@ -146,7 +146,7 @@ def display_slice(data, index = None, dim = 0, bounds = None, title = None):
     if title:
         plt.title(title)
 
-def display_projection(data, dim = 0, title = None):
+def display_projection(data, dim = 1, title = None):
     
     img = data.sum(dim)
     
