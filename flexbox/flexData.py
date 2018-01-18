@@ -36,9 +36,7 @@ def read_flexray(path):
         proj (numpy.array): projections stack
         flat (numpy.array): reference flat field images
         dark (numpy.array): dark field images   
-        geom (dict): description of the deometry 
-        phys (dict): description of the physical settings
-        lyric (dict): comments
+        meta (dict): description of the geometry, physical settings and comments
     '''
     dark = read_raw(path, 'di')
     
@@ -46,9 +44,9 @@ def read_flexray(path):
     
     proj = read_raw(path, 'scan_')
     
-    geom, phys, lyric = read_log(path, 'flexray')   
+    meta = read_log(path, 'flexray')   
     
-    return proj, flat, dark, geom, phys, lyric
+    return proj, flat, dark, meta
         
 def read_raw(path, name, skip = 1, sample = [1, 1], x_roi = [], y_roi = [], dtype = 'float32', disk_map = None):
     """
@@ -597,8 +595,8 @@ def _get_flexray_keywords_():
                     
                     'exposure time (ms)':'exposure'}
 
-    description =  {'Sample name' : 'comments',
-                    'Comment' : 'name',                    
+    description =  {'sample name' : 'comments',
+                    'comment' : 'name',                    
 
                     'date':'date'}
                     
