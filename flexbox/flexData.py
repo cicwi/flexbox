@@ -621,11 +621,13 @@ def _correct_flex_(records):
     
     # Compute the center of the detector:
     roi = numpy.int32(records.get('roi').split(sep=','))
+    records['roi'] = roi
+
     centre = [(roi[0] + roi[2]) // 2 - 971, (roi[1] + roi[3]) // 2 - 767]
     
     # Take into account the ROI of the detector:
-    records['det_vrt'] -= centre[1] / records.get('binning')
-    records['det_hrz'] -= centre[0] / records.get('binning')
+    records['det_vrt'] -= centre[1] / records.get('binning') * records['det_pixel']
+    records['det_hrz'] -= centre[0] / records.get('binning') * records['det_pixel']
     
     vol_center = (records['det_vrt'] + records['src_vrt']) / 2
     records['vol_vrt'] = vol_center
