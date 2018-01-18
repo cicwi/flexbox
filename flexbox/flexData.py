@@ -283,42 +283,45 @@ def mm2pixel(value, geometry):
 
     return value / img_pixel
     
-def astra_vol_geom(geometry, vol_shape, slice_first = None, slice_last = None, sample = [1, 1]):
+def astra_vol_geom(geometry, vol_shape, proj_shape, slice_first=None, slice_last=None, sample=[1, 1]):
     '''
     Initialize volume geometry.        
     '''
     # Shape and size (mm) of the volume
     vol_shape = numpy.array(vol_shape)
-    
+
     mag = (geometry['det2obj'] + geometry['src2obj']) / geometry['src2obj']
+    det_size = geometry['det_pixel'] * numpy.array(sample) * proj_shape
 
-    voxel = numpy.array([sample[0], sample[1], sample[1]]) * geometry['det_pixel'] / mag
-
-    size = vol_shape * voxel
+    voxel = numpy.array([sample[0], sample[1], sample[1]]
+            ) * geometry['det_pixel'] / mag
+    length = det_size[1] / mag
+    size = numpy.array([vol_shape[0] / vol_shape[1] * length, length,
+                        vol_shape[2] / vol_shape[1] * length])
 
     if (slice_first is not None) & (slice_last is not None):
         # Generate volume geometry for one chunk of data:
-                   
+
         length = vol_shape[0]
-        
+
         # Compute offset from the centre:
         centre = (length - 1) / 2
         offset = (slice_first + slice_last) / 2 - centre
         offset = offset * voxel[0]
-        
+
         shape = [slice_last - slice_first + 1, vol_shape[1], vol_shape[2]]
         size = shape * voxel[0]
 
     else:
         shape = vol_shape
-        offset = 0     
-        
-    vol_geom = astra.create_vol_geom(shape[1], shape[2], shape[0], 
-              -size[2]/2, size[2]/2, -size[1]/2, size[1]/2, 
-              -size[0]/2 + offset, size[0]/2 + offset)
-        
-    return vol_geom   
+        offset = 0
 
+    vol_geom = astra.create_vol_geom(shape[1], shape[2], shape[0],
+                                     -size[1] / 2, size[1] / 2, -
+                                     size[2] / 2, size[2] / 2,
+                                     -size[0] / 2 + offset, size[0] / 2 + offset)
+
+    return vol_geom
 def astra_proj_geom(geometry, data_shape, index = None, sample = [1, 1]):
     """
     Generate the vector that describes positions of the source and detector.
