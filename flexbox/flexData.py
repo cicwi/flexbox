@@ -36,9 +36,8 @@ def read_flexray(path):
         proj (numpy.array): projections stack
         flat (numpy.array): reference flat field images
         dark (numpy.array): dark field images   
-        geom (dict): description of the deometry 
-        phys (dict): description of the physical settings
-        lyric (dict): comments
+        meta (dict): description of the meta data
+        
     '''
     dark = read_raw(path, 'di')
     
@@ -46,9 +45,9 @@ def read_flexray(path):
     
     proj = read_raw(path, 'scan_')
     
-    geom, phys, lyric = read_log(path, 'flexray')   
+    meta = read_log(path, 'flexray')   
     
-    return proj, flat, dark, geom, phys, lyric
+    return proj, flat, dark, meta
         
 def read_raw(path, name, skip = 1, sample = [1, 1], x_roi = [], y_roi = [], dtype = 'float32', disk_map = None):
     """
@@ -494,6 +493,43 @@ def tiles_shape(shape, geometry_list):
     
     return new_shape, geometry
     
+def _find_shift_(data_a, data_b):    
+    """
+    Find a small 2D shift between two 3d images.
+    """
+    from skimage import feature
+    import scipy.ndimage
+        
+    # Crop to intersection area:
+    crop = data_b * data_a > 0
+        
+    # If an images have no intersection - shift is zero
+    if crop.sum() == 0:
+        return numpy.zeros(2)
+                
+    x_min = numpy.min(numpy.where(crop.max(0)))
+    x_max = numpy.max(numpy.where(crop.max(0)))
+    y_min = numpy.min(numpy.where(crop.max(1)))
+    y_max = numpy.max(numpy.where(crop.max(1)))
+    
+    data_a_ = data_a[y_min:y_max, x_min:x_max].copy()      
+    data_b_ = data_b[y_min:y_max, x_min:x_max].copy() 
+
+    # Laplace is way better for clipped objects!
+    data_a_ = scipy.ndimage.laplace(data_a_)
+    data_b_ = scipy.ndimage.laplace(data_b_)
+    
+    shift, error, diffphase = feature.register_translation(data_a_, data_b_, 10)
+    
+    # Correlate
+    #corr = numpy.abs(numpy.fft.ifft2(numpy.fft.fft2(data_a_) * 
+    #                                 numpy.conj(numpy.fft.fft2(data_b_))))
+    #corr = numpy.fft.fftshift(corr)
+     
+    #shift = numpy.array(numpy.unravel_index(numpy.argmax(corr), corr.shape)) - numpy.array(corr.shape) // 2
+    
+    return shift
+    
 def append_tile(data, geom, tot_data, tot_geom):
     """
     Append a tile to a larger dataset.
@@ -507,7 +543,7 @@ def append_tile(data, geom, tot_data, tot_geom):
     """ 
     
     import scipy.ndimage.interpolation as interp
-
+    
     print('Stitching a tile...')               
     
     # Assuming all projections have equal number of angles and same pixel sizes
@@ -533,14 +569,36 @@ def append_tile(data, geom, tot_data, tot_geom):
     
     flexUtil.progress_bar(0)    
     
+    # Collapce both datasets and compute residual shift
+    total_ = tot_data.sum(1)
+    proj_ = data.sum(1)
+    #total_ = tot_data[:,0,:]
+    #proj_ = data[:,0,:]
+    
+    proj_ = numpy.pad(proj_, ((0, pad_y), (0, pad_x)), mode = 'constant') 
+    
+    #if y_offset > 1:
+    if (x_offset > 1) | (y_offset > 1):
+        print('***')
+        proj_ = interp.shift(proj_, [y_offset+3, x_offset], order = 1)
+    
+    shift = _find_shift_(total_, proj_)
+       
+    print('Found residual shift between tiles:', shift)
+    
+    x_offset += shift[1]
+    y_offset += shift[0]
+   
+    # Apply offsets:
     for ii in range(tot_data.shape[1]):   
         
         # Pad to match sizes:
         proj = numpy.pad(data[:, ii, :], ((0, pad_y), (0, pad_x)), mode = 'constant')  
         
         # Apply shift:
-        proj = interp.shift(proj, [y_offset, x_offset], order = 1)
-        
+        if (x_offset > 1) | (y_offset > 1):   
+            proj = interp.shift(proj, [y_offset, x_offset], order = 1)
+                    
         # Add:
         tot_data[:, ii, :] = numpy.max((proj, tot_data[:, ii, :]), 0)
         

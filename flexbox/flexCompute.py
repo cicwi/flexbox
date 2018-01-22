@@ -361,6 +361,7 @@ def process_flex(path, options = {'bin':1, 'disk_map': None}):
     proj = flexData.read_raw(path, 'scan_', skip = bins, sample = [bins, bins], disk_map = disk_map)
 
     meta = flexData.read_log(path, 'flexray', bins = bins)   
+            
     meta['geometry']['thetas'] = meta['geometry']['thetas'][::bins]
     
     # Prepro:
@@ -373,7 +374,9 @@ def process_flex(path, options = {'bin':1, 'disk_map': None}):
         
     proj = flexData.raw2astra(proj)    
     
-    flexUtil.display_slice(proj)
-        
+    # Sometimes flex files don't report theta range...
+    if len(meta['geometry']['thetas']) == 0:
+        meta['geometry']['thetas'] = numpy.linspace(0, 360, proj.shape[1])
+            
     return proj, meta
 

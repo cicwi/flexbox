@@ -150,6 +150,7 @@ def display_projection(data, dim = 1, title = None):
     
     img = data.sum(dim)
     
+    plt.figure()
     plt.imshow(img)
     plt.colorbar()
     

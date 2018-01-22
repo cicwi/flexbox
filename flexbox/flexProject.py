@@ -207,6 +207,8 @@ def FDK(projections, volume, geometry):
     """
     FDK
     """
+    print('FDK reconstruction...')
+    
     # Make sure array is contiguous (if not memmap):
     flexUtil.progress_bar(0)    
     
