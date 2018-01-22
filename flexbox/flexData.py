@@ -36,8 +36,7 @@ def read_flexray(path):
         proj (numpy.array): projections stack
         flat (numpy.array): reference flat field images
         dark (numpy.array): dark field images   
-        meta (dict): description of the meta data
-        
+        meta (dict): description of the geometry, physical settings and comments
     '''
     dark = read_raw(path, 'di')
     
@@ -655,8 +654,8 @@ def _get_flexray_keywords_():
                     
                     'exposure time (ms)':'exposure'}
 
-    description =  {'Sample name' : 'comments',
-                    'Comment' : 'name',                    
+    description =  {'sample name' : 'comments',
+                    'comment' : 'name',                    
 
                     'date':'date'}
                     
