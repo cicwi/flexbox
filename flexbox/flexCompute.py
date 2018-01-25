@@ -335,13 +335,13 @@ def optimize_rotation_center(projections, geometry, guess = None, subscale = 1, 
     
     return guess
 
-def process_flex(path, options = {'bin':1, 'disk_map': None}):
+def process_flex(path, options = {'bin':1, 'memmap': None}):
     '''
     Read and process the data.
     
     Args:
         path:  path to the flexray data
-        options: dictionary of options, such as bin (binning), disk_map (use disk_map to save RAM)
+        options: dictionary of options, such as bin (binning), memmap (use memmap to save RAM)
         
     Return:
         proj: min-log projections
@@ -350,7 +350,7 @@ def process_flex(path, options = {'bin':1, 'disk_map': None}):
     '''
     
     bins = options['bin']
-    disk_map = options['disk_map']
+    memmap = options['memmap']
     
     # Read:    
     print('Reading...')
@@ -358,7 +358,7 @@ def process_flex(path, options = {'bin':1, 'disk_map': None}):
     dark = flexData.read_raw(path, 'di', sample = [bins, bins])
     flat = flexData.read_raw(path, 'io', sample = [bins, bins])    
     
-    proj = flexData.read_raw(path, 'scan_', skip = bins, sample = [bins, bins], disk_map = disk_map)
+    proj = flexData.read_raw(path, 'scan_', skip = bins, sample = [bins, bins], memmap = memmap)
 
     meta = flexData.read_log(path, 'flexray', bins = bins)   
             
@@ -380,3 +380,149 @@ def process_flex(path, options = {'bin':1, 'disk_map': None}):
             
     return proj, meta
 
+def medipix_quadrant_shift(data):
+    '''
+    Expand the middle line
+    '''
+    
+    print('Applying medipix pixel shift.')
+    
+    # this one has to be applied to the whole dataset as it changes its size
+    
+    flexUtil.progress_bar(0)
+    data[:,:, 0:data.shape[2]//2 - 2] = data[:,:, 2:data.shape[2]/2]
+    data[:,:, data.shape[2]//2 + 2:] = data[:,:, data.shape[2]//2:-2]
+
+    flexUtil.progress_bar(0.5)
+
+    # Fill in two extra pixels:
+    for ii in range(-2,2):
+        closest_offset = -3 if (numpy.abs(-3-ii) < numpy.abs(2-ii)) else 2
+        data[:,:, data.shape[2]//2 - ii] = data[:,:, data.shape[2]//2 + closest_offset]
+
+    flexUtil.progress_bar(0.7)
+
+    # Then in columns
+    data[0:data.shape[0]//2 - 2,:,:] = data[2:data.shape[0]//2,:,:]
+    data[data.shape[0]//2 + 2:, :, :] = data[data.shape[0]//2:-2,:,:]
+
+    # Fill in two extra pixels:
+    for jj in range(-2,2):
+        closest_offset = -3 if (numpy.abs(-3-jj) < numpy.abs(2-jj)) else 2
+        data[data.shape[0]//2 - jj,:,:] = data[data.shape[0]//2 + closest_offset,:,:]
+
+    flexUtil.progress_bar(1)
+
+    print('Medipix quadrant shift applied.')    
+    
+def _find_shift_(data_a, data_b):    
+    """
+    Find a small 2D shift between two 3d images.
+    """
+    from skimage import feature
+    import scipy.ndimage
+        
+    # Crop to intersection area:
+    crop = data_b * data_a > 0
+        
+    # If an images have no intersection - shift is zero
+    if crop.sum() == 0:
+        return numpy.zeros(2)
+                
+    x_min = numpy.min(numpy.where(crop.max(0)))
+    x_max = numpy.max(numpy.where(crop.max(0)))
+    y_min = numpy.min(numpy.where(crop.max(1)))
+    y_max = numpy.max(numpy.where(crop.max(1)))
+    
+    data_a_ = data_a[y_min:y_max, x_min:x_max].copy()      
+    data_b_ = data_b[y_min:y_max, x_min:x_max].copy() 
+
+    # Laplace is way better for clipped objects!
+    data_a_ = scipy.ndimage.laplace(data_a_)
+    data_b_ = scipy.ndimage.laplace(data_b_)
+    
+    # Shift registration with subpixel accuracy (skimage):
+    shift, error, diffphase = feature.register_translation(data_a_, data_b_, 10)
+    
+    # Correlate
+    #corr = numpy.abs(numpy.fft.ifft2(numpy.fft.fft2(data_a_) * 
+    #                                 numpy.conj(numpy.fft.fft2(data_b_))))
+    #corr = numpy.fft.fftshift(corr)
+     
+    #shift = numpy.array(numpy.unravel_index(numpy.argmax(corr), corr.shape)) - numpy.array(corr.shape) // 2
+    
+    return shift
+    
+def append_tile(data, geom, tot_data, tot_geom):
+    """
+    Append a tile to a larger dataset.
+    Args:
+        
+        data: projection stack
+        geom: geometry descritption
+        tot_data: output array
+        tot_geom: output geometry
+        
+    """ 
+    
+    import scipy.ndimage.interpolation as interp
+    
+    print('Stitching a tile...')               
+    
+    # Assuming all projections have equal number of angles and same pixel sizes
+    total_shape = tot_data.shape[::2]
+    det_shape = data.shape[::2]
+    
+    total_size = flexData.detector_size(total_shape, tot_geom)
+    det_size = flexData.detector_size(det_shape, geom)
+                    
+    # Offset from the left top corner:
+    x0 = tot_geom['det_hrz']
+    y0 = tot_geom['det_vrt']
+    
+    x = geom['det_hrz']
+    y = geom['det_vrt']
+        
+    x_offset = ((x - x0) + total_size[1] / 2 - det_size[1] / 2) / geom['det_pixel']
+    y_offset = ((y - y0) + total_size[0] / 2 - det_size[0] / 2) / geom['det_pixel']
+    
+    # Pad image to get the same size as the total_slice:        
+    pad_x = tot_data.shape[2] - data.shape[2]
+    pad_y = tot_data.shape[0] - data.shape[0]  
+    
+    flexUtil.progress_bar(0)    
+    
+    # Collapce both datasets and compute residual shift
+    #total_ = tot_data.sum(1)
+    #proj_ = data.sum(1)
+    total_ = tot_data[:,0,:]
+    proj_ = data[:,0,:]
+    
+    proj_ = numpy.pad(proj_, ((0, pad_y), (0, pad_x)), mode = 'constant') 
+    
+    if (x_offset > 1) | (y_offset > 1):
+        
+        proj_ = interp.shift(proj_, [y_offset, x_offset], order = 1)
+    
+    shift = _find_shift_(total_, proj_)
+       
+    if abs(shift).sum() > 0:
+        print('Found residual shift between tiles:', shift)
+    
+    x_offset += shift[1]
+    y_offset += shift[0]
+   
+    # Apply offsets:
+    for ii in range(tot_data.shape[1]):   
+        
+        # Pad to match sizes:
+        proj = numpy.pad(data[:, ii, :], ((0, pad_y), (0, pad_x)), mode = 'constant')  
+        
+        # Apply shift:
+        if (x_offset > 1) | (y_offset > 1):   
+            proj = interp.shift(proj, [y_offset, x_offset], order = 1)
+                    
+        # Add:
+        tot_data[:, ii, :] = numpy.max((proj, tot_data[:, ii, :]), 0)
+        
+        flexUtil.progress_bar((ii+1) / tot_data.shape[1])

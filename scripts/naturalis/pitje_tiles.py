@@ -15,20 +15,22 @@ import gc
 
 #%% Run a test:
     
-path = '/export/scratch2/kostenko/archive/Natrualis/pitje/femur/high_res/original_orientation/t1'
-proj, meta = flex.compute.process_flex(path, options = {'bin':4, 'disk_map': None}) 
+path = '/export/scratch2/kostenko/archive/Natrualis/pitje/femur/high_res/femur_batch/block_2/stack_1'
+proj, meta = flex.compute.process_flex(path, options = {'bin':4, 'memmap': None}) 
 vol = flex.project.init_volume(proj)
 flex.project.FDK(proj, vol, meta['geometry'])
 flex.util.display_slice(vol, dim = 0,title = 'FDK')    
 
-path = '/export/scratch2/kostenko/archive/Natrualis/pitje/femur/high_res/original_orientation/t2'
-proj1, meta1 = flex.compute.process_flex(path, options = {'bin':4, 'disk_map': None}) 
+path = '/export/scratch2/kostenko/archive/Natrualis/pitje/femur/high_res/femur_batch/block_2/stack_2'
+proj1, meta1 = flex.compute.process_flex(path, options = {'bin':4, 'memmap': None}) 
 vol1 = flex.project.init_volume(proj1)
 flex.project.FDK(proj1, vol1, meta1['geometry'])
 flex.util.display_slice(vol1, dim = 0,title = 'FDK')    
 
 #%% merge:
-input_paths = ['/export/scratch2/kostenko/archive/Natrualis/pitje/femur/high_res/original_orientation/t1', '/export/scratch2/kostenko/archive/Natrualis/pitje/femur/high_res/original_orientation/t2']
+input_paths = ['/export/scratch2/kostenko/archive/Natrualis/pitje/femur/high_res/femur_batch/block_1/stack_1', 
+'/export/scratch2/kostenko/archive/Natrualis/pitje/femur/high_res/femur_batch/block_1/stack_2']
+output_path = '/export/scratch2/kostenko/archive/Natrualis/pitje/femur/high_res/femur_batch/block_1/FDK_'
 
 total, meta = merge_projections(input_paths)
 
@@ -39,9 +41,9 @@ flex.project.FDK(total, vol, meta['geometry'])
 
 flex.util.display_slice(vol, dim = 0,title = 'FDK')  
 
-vol = flex.util.cast2type(vol, 'uint8', [0, 100])
-flex.data.write_raw(output_path_a, 'vol', vol, dim = 0)
-flex.data.write_meta(output_path_a + 'meta.toml', meta)   
+vol = flex.data.cast2type(vol, 'uint8', [0, 1])
+flex.data.write_raw(output_path, 'vol', vol, dim = 0)
+flex.data.write_meta(output_path + 'meta.toml', meta)   
 
 #%% Define things:
     
@@ -117,12 +119,12 @@ def merge_projections(input_paths):
     # Read data:
     for path in input_paths: 
         # read and process:
-        proj, meta = flex.compute.process_flex(path, options = {'bin':bins, 'disk_map': None})  
+        proj, meta = flex.compute.process_flex(path, options = {'bin':bins, 'memmap': None})  
         
         # Correct beam hardeinng:
-        proj = flex.spectrum.equivalent_density(proj, meta['geometry'], energy, spec, compound = 'Al', density = 2.7)     
+        #proj = flex.spectrum.equivalent_density(proj, meta['geometry'], energy, spec, compound = 'Al', density = 2.7)     
     
-        flex.data.append_tile(proj, meta['geometry'], total, tot_geom)
+        flex.compute.append_tile(proj, meta['geometry'], total, tot_geom)
         
         #flex.util.display_slice(total, dim = 1)
         
@@ -148,7 +150,7 @@ vol = numpy.zeros([760, 1800, 1800], dtype = 'float32')
 flex.project.FDK(total, vol, meta['geometry'])
 
 # Save reconstruction:    
-vol = flex.util.cast2type(vol, 'uint8', [0, 100])
+vol = flex.data.cast2type(vol, 'uint8', [0, 100])
 flex.data.write_raw(output_path_a, 'vol', vol, dim = 0)
 flex.data.write_meta(output_path_a + 'meta.toml', meta)    
 
@@ -159,7 +161,7 @@ total, tot_geom = merge_projections(paths_b)
 vol = numpy.zeros([760, 1800, 1800], dtype = 'float32')
 flex.project.FDK(total, vol, meta['geometry'])
 
-vol = flex.util.cast2type(vol, 'uint8', [0, 100])
+vol = flex.data.cast2type(vol, 'uint8', [0, 100])
 flex.data.write_raw(output_path_b, 'vol', vol, dim = 0)
 flex.data.write_meta(output_path_b + 'meta.toml', meta)    
 
@@ -170,7 +172,7 @@ total, tot_geom = merge_projections(paths_c)
 vol = numpy.zeros([760, 1800, 1800], dtype = 'float32')
 flex.project.FDK(total, vol, meta['geometry'])
 
-vol = flex.util.cast2type(vol, 'uint8', [0, 100])
+vol = flex.data.cast2type(vol, 'uint8', [0, 100])
 flex.data.write_raw(output_path_c, 'vol', vol, dim = 0)
 flex.data.write_meta(output_path_c + 'meta.toml', meta)    
     
@@ -181,7 +183,7 @@ total, tot_geom = merge_projections(paths_d)
 vol = numpy.zeros([760, 1800, 1800], dtype = 'float32')
 flex.project.FDK(total, vol, meta['geometry'])
 
-vol = flex.util.cast2type(vol, 'uint8', [0, 100])
+vol = flex.data.cast2type(vol, 'uint8', [0, 100])
 flex.data.write_raw(output_path_d, 'vol', vol, dim = 0)
 flex.data.write_meta(output_path_d + 'meta.toml', meta)    
 
@@ -192,7 +194,7 @@ total, tot_geom = merge_projections(paths_e)
 vol = numpy.zeros([760, 1800, 1800], dtype = 'float32')
 flex.project.FDK(total, vol, meta['geometry'])
 
-vol = flex.util.cast2type(vol, 'uint8', [0, 100])
+vol = flex.data.cast2type(vol, 'uint8', [0, 100])
 flex.data.write_raw(output_path_e, 'vol', vol, dim = 0)
 flex.data.write_meta(output_path_e + 'meta.toml', meta)    
 
@@ -203,7 +205,7 @@ total, tot_geom = merge_projections(paths_f)
 vol = numpy.zeros([760, 1800, 1800], dtype = 'float32') 
 flex.project.FDK(total, vol, meta['geometry'])
 
-vol = flex.util.cast2type(vol, 'uint8', [0, 100])
+vol = flex.data.cast2type(vol, 'uint8', [0, 100])
 flex.data.write_raw(output_path_f, 'vol', vol, dim = 0)
 flex.data.write_meta(output_path_f + 'meta.toml', meta)    
 

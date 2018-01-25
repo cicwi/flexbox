@@ -13,6 +13,7 @@ import sys
 if len(sys.argv) == 1:
     print("USAGE: python", sys.argv[0], "<path to data>")
     exit(-1)
+    
 path = sys.argv[1]
 
 dark = flex.data.read_raw(path, 'di')

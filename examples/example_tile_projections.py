@@ -18,9 +18,9 @@ paths_a = []
 paths_b = []
 paths_c = []
 
-paths_a.append('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/t1')
-paths_a.append('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/t2')
-output_path_a = '/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/vol_0'
+paths_a.append('/export/scratch2/kostenko/archive/Natrualis/pitje/femur/high_res/femur_batch/block_2/stack_1')
+paths_a.append('/export/scratch2/kostenko/archive/Natrualis/pitje/femur/high_res/femur_batch/block_2/stack_2')
+output_path_a = '/export/scratch2/kostenko/archive/Natrualis/pitje/femur/high_res/femur_batch/block_2/fdk_/'
 
 paths_b.append('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/t3')
 paths_b.append('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/t4')
@@ -30,12 +30,12 @@ paths_c.append('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high
 paths_c.append('/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/t6')
 output_path_c = '/export/scratch2/kostenko/archive/Natrualis/pitje/skull_cap/high_res/vol_2'
 
-
-# Load data needed for beam hardening correction:
-energy, spec = numpy.loadtxt('/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_1mm_brass/spectrum.txt')
         
 #%% Read, process, merge, reconstruct data:
  
+# Load data needed for beam hardening correction:
+energy, spec = numpy.loadtxt('/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_1mm_brass/spectrum.txt')
+
 def merge_projections(input_paths):
     '''
     Merge datasets and reconstruct the total:
@@ -62,9 +62,9 @@ def merge_projections(input_paths):
         proj, meta = flex.compute.process_flex(path, options = {'bin':bins, 'disk_map': None})  
         
         # Correct beam hardeinng:
-        proj = flex.spectrum.equivalent_density(proj, meta['geometry'], energy, spec, compound = 'Al', density = 2.7)     
+        #proj = flex.spectrum.equivalent_density(proj, meta['geometry'], energy, spec, compound = 'Al', density = 2.7)     
     
-        flex.data.append_tile(proj, meta['geometry'], total, tot_geom)
+        flex.compute.append_tile(proj, meta['geometry'], total, tot_geom)
         
         flex.util.display_slice(total, dim = 1)
         
@@ -90,7 +90,7 @@ vol = numpy.zeros([760, 1800, 1800], dtype = 'float32')
 flex.project.FDK(total, vol, meta['geometry'])
 
 # Save reconstruction:    
-vol = flex.util.cast2type(vol, 'uint8', [0, 10])
+vol = flex.data.cast2type(vol, 'uint8', [0, 1])
 flex.data.write_raw(output_path_a, 'vol', vol, dim = 0)
 flex.data.write_meta(output_path_a + 'meta.toml', meta)    
 
@@ -101,7 +101,7 @@ total, tot_geom = merge_projections(paths_b)
 vol *= 0 
 flex.project.FDK(total, vol, meta['geometry'])
 
-vol = flex.util.cast2type(vol, 'uint8', [0, 10])
+vol = flex.data.cast2type(vol, 'uint8', [0, 10])
 flex.data.write_raw(output_path_b, 'vol', vol, dim = 0)
 flex.data.write_meta(output_path_b + 'meta.toml', meta)    
 
@@ -112,7 +112,7 @@ total, tot_geom = merge_projections(paths_c)
 vol *= 0 
 flex.project.FDK(total, vol, meta['geometry'])
 
-vol = flex.util.cast2type(vol, 'uint8', [0, 10])
+vol = flex.data.cast2type(vol, 'uint8', [0, 10])
 flex.data.write_raw(output_path_c, 'vol', vol, dim = 0)
 flex.data.write_meta(output_path_c + 'meta.toml', meta)    
     

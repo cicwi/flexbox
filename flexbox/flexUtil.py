@@ -27,37 +27,6 @@ def anyslice(array, index, dim):
       
     return sl
 
-def cast2type(array, dtype, bounds = None):
-    """
-    Cast from float to int or float to float rescaling values if needed.
-    """
-    # No? Yes? OK...
-    if array.dtype == dtype:
-        return array
-    
-    # Make sue dtype is not a string:
-    dtype = numpy.dtype(dtype)
-    
-    # If cast to float, simply cast:
-    if dtype.kind == 'f':
-        return numpy.array(array, dtype)
-    
-    # If to integer, rescale:
-    if bounds is None:
-        bounds = [numpy.amin(array), numpy.amax(array)]
-    
-    data_max = numpy.iinfo(dtype).max
-    
-    array -= bounds[0]
-    array *= data_max / (bounds[1] - bounds[0])
-    
-    array[array < 0] = 0
-    array[array > data_max] = data_max
-    
-    array = numpy.array(array, dtype)    
-    
-    return array
-
 def progress_bar(progress):
     """
     Plot progress in pseudographics:
@@ -145,6 +114,8 @@ def display_slice(data, index = None, dim = 0, bounds = None, title = None):
     
     if title:
         plt.title(title)
+        
+    plt.show()    
 
 def display_projection(data, dim = 1, title = None):
     
@@ -156,7 +127,9 @@ def display_projection(data, dim = 1, title = None):
     
     if title:
         plt.title(title)
-        
+    
+    plt.show()
+    
 def display_max_projection(data, dim = 0, title = None):
     
     img = data.max(dim)
@@ -166,7 +139,9 @@ def display_max_projection(data, dim = 0, title = None):
     
     if title:
         plt.title(title)     
-
+        
+    plt.show()
+        
 def display_min_projection(data, dim = 0, title = None):
     
     img = data.min(dim)
@@ -176,3 +151,5 @@ def display_min_projection(data, dim = 0, title = None):
     
     if title:
         plt.title(title)         
+        
+    plt.show()

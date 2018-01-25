@@ -10,274 +10,660 @@ This module allows to create a pipeline of operations. Each data unit trickles t
 #import os
 import numpy
 import time
+import gc
+import os
 
 from . import flexData
+from . import flexProject
+from . import flexCompute
+from . import flexUtil
 
-class Data:
+class Block:
     """
     A CT dataset.
     """
     
-    def __init__(self, proj, flat, dark, meta):
+    def __init__(self, path = ''):
         """
         Initialize a dataset object.
         """
         
-        self.proj = proj
-        self.flat = flat
-        self.dark = dark
-        self.meta = meta
+        self.data = []
+        self.flat = []
+        self.dark = []
+        self.meta = []
         
         self.status = 'pending'
-        self.memory = 'disk'
+        self.type = 'projections'
+        
+        self.path = path
         
         self.process_log = []
+
+    @property
+    def geometry(self):
         
-    def log_begin(self, action, condition):
+        if self.meta:
+            return self.meta.get('geometry')
+        else:
+            return None
+        
+    def log_begin(self, name, condition):
         """
         Operation begin log record.
         """       
-        self.process_log.append(['started', action.__name__, condition, time.ctime()])    
+        self.process_log.append(['started',name, condition, time.ctime()])    
     
-    def log_end(self, action, condition):
+    def log_end(self, name, condition):
         """
         Operation end log record.
         """ 
-        self.process_log.append(['finished', action.__name__, condition, time.ctime()])    
-               
-class Pipe:
+        self.process_log.append(['finished', name, condition, time.ctime()])    
         
-    def __init__(self):
+    def isfinished(self, action_name):
+        """
+        Checks if this action was applied and finished.
+        """
+        
+        find = [record for record in self.process_log if record[1] == action_name]
+        if find != []:
+            if find[-1][0] == 'finished':
+                
+                return True
+                
+class Action:
+    """
+    A batch job operation applied to a nuber of datasets.
+    """                
+    def __init__(self, name, callback, conditions = {}, type = 'batch'):
+        
+        self.name = name
+        self.callback = callback
+        self.conditions = conditions
+        self.type = type
+        
+        self.status = 'pending'
+        self.count = 0
+                       
+class Pipe:
+    """
+    The Pipe is handling the data que and the action que. 
+    Data que consists of blocks that fall down the action que until they hit the bottom or a group action.
+    """     
+    def __init__(self, pipe = None):
         """
         Initialize the Pipe!
         """
-        
         # Actions and their conditions to be applied to data:
-        self._action_stack_ = []
-        self._condition_stack_ = []
-
+        self._action_que_ = []
+        
         # Data:
-        self._datas_ = []  
+        self._data_que_ = []  
 
-        # Buffer for group operations:
-        self._buffer_ = []
+        # If pipe is provided - copy it's action que!
 
-    def add_data(self, data):
-        """
-        Add a dataset object to the stack.
-        """
-        
-        self._datas_.append(data)
-        
-    def scan_data(self):
-        """
-        A plug for a future scan data! action
-        """
-        self._action_stack_.append(_scan_data_)
-        self._condition_stack_.append({})
-                             
-    def process_data(self):
-        """
-        Apply standard processing.
-        """
-        self._action_stack_.append(_process_data_)
-        self._condition_stack_.append({})
+        # Buffer for group actions:
+        self._buffer_ = {}
 
-    def merge_datas(self):
-        """
-        Apply standard processing.
-        """
-        self._action_stack_.append(_merge_datas_)    
-        self._condition_stack_.append({'group':True})
+        # Connection to other pipes:
+        self._connections_ = []    
+
+        # This one maps function names to callback funtions:
+        self._callback_dictionary_ = {'scan_flexray': self._scan_flexray_, 'read_flexray': self._read_flexray_, 
+        'read_all_meta': self._read_all_meta_, 'process_flex': self._process_flex_, 'crop': self._crop_,
+        'merge_detectors': self._merge_detectors_, 'merge_volume': self._merge_volume_, 
+        'fdk': self._fdk_, 'write_flexray': self._write_flexray_, 'cast2int':self._cast2int_, 
+        'display':self._display_, 'memmap':self._memmap_, 'read_volume': self._read_volume_}
         
-    def fdk_data(self):
-        """
-        Reconstruct FDK.
-        """
-        self._action_stack_.append(_fdk_data_)    
-        self._condition_stack_.append({})
+        # This one maps function names to condition that have to be used with them:
+        self._condition_dictionary_ = {'scan_flexray': ['path'], 'read_flexray': ['sampling'], 
+        'read_all_meta':[],'process_flex': [], 'crop': ['crop'],
+        'merge_detectors': ['memmap'], 'merge_volume':['memmap'], 'fdk': [], 'write_flexray': ['folder'], 
+        'cast2int':['bounds'], 'display':[], 'memmap':['path'], 'read_volume': []}
         
+        # This one maps function names to function types. There are three: batch, standby, coincident
+        self._type_dictionary_ = {'scan_flexray': 'batch', 'read_flexray': 'batch', 
+        'read_all_meta':'concurrent', 'process_flex': 'batch', 'crop': 'batch', 
+        'merge_detectors': 'standby', 'merge_volume':'standby', 'fdk': 'batch', 'write_flexray': 'batch', 
+        'cast2int':'batch', 'display':'batch', 'memmap':'batch', 'read_volume': 'batch'}
         
+    def template(self, pipe):
+        """
+        Copy the pipe action que to a new pipe
+        """
+                
+        for action in pipe._action_que_:
+            # Actions need to be connected to this pipe's callbacks!
+            callback = self._callback_dictionary_.get(action.name)
+            
+            myaction = Action(action.name, callback, action.conditions, action.type)
+            self._action_que_.append(myaction)
+                
+    def connect(self, pipe):
+        """
+        Connect to another pipe:copy()
+        """
+        self._connections_.append(pipe)
+
+    def __del__(self):
+        """
+        Clean up.
+        """
+        self.flush()
+        
+    def flush(self):
+        """
+        Flush the data.
+        """
+        
+        # Data:
+        self._data_que_.clear()
+        
+        # CLear count for actions:
+        for action in self._action_que_:
+            action.count = 0
+        
+        # Buffer for the group actions:
+        self._buffer_ = {}
+
+        gc.collect()
+
+    def clean(self):
+        """
+        Erase everything!
+        """        
+        # Actions and their conditions to be applied to data:
+        self._action_que_ = []
+        self._connections_ = []
+
+        self.flush()   
+        
+    def actions_dictionary(self):
+        """
+        Get the list of recognized actions
+        """
+        print('List of legal actions:')
+        
+        for key in self._callback_dictionary_.keys():
+            print(key, '   :   ', self._condition_dictionary_.get(key))
+
+    def add_data(self, path = '', block = None):
+        """
+        Add a block of data to the pipe. 
+        """
+        
+        if path != '':
+            block = Block(path)
+                            
+        self._data_que_.append(block)
+            
+    def schedule(self, name, condition = {}):
+        """
+        Schedule an action.
+        """
+        # Create an action:
+        callback = self._callback_dictionary_.get(name)
+        if not callback: raise ValueError('Unrecognised function:', name)
+        
+        mincond = self._condition_dictionary_.get(name)
+        if not all([(x in condition) for x in mincond]): 
+            raise ValueError('Check your conditions. They should be:', mincond)
+            
+        act_type = self._type_dictionary_.get(name) 
+        if not act_type: raise ValueError('Type of the action unknown!')
+            
+        action = Action(name, callback, condition, act_type)
+        
+        self._action_que_.append(action)
+        
+    def refresh_connections(self):
+        
+        # If connected to more pipes, run them and use their data
+        if len(self._connections_) > 0:
+            
+            self.flush()
+            
+            # Get their outputs
+            for pipe in self._connections_:
+            
+                # Run doughter pipes:
+                pipe.run()    
+                
+                # Copy data_que:
+                self._data_que_.extend(pipe._data_que_)
+                
+                # Reset the que status:
+                for data in self._data_que_:
+                    data.status = 'pending'
         
     def run(self):
         """
-        Run me! Each dataset is picked from _datas_ array and trickled down the pipe.
+        Run me! Each dataset is picked from _data_que_ array and trickled down the pipe.
         """
         
-        ready = False
-        group_ready = False
+        # In case connected to other pipes:
+        self.refresh_connections()                
         
-        # Input for a group action if there is one
-        group_input = []
-
-        while not ready:
+        # TEMP:
+        for data in self._data_que_:
+            data.process_log = []
         
-            # Pick a data:
-            pending = [data for data in self._datas_ if data.status == 'pending']
+        print(' *** Starting a pipe run *** ')
+                
+        # While all datasets are not ready:
+        while not self._is_ready_():
+ 
+            print('------------------------')
+            print('New data block in the pipline!')
             
-            if len(pending) == 0:                
-                print('Pipe is empty...')
-                            
-            # Current data in the pipe:            
-            data = pending[0]  
-        
+            # Pick a data block:
+            block = self._pick_data_()
+            
             # Trickle the bastard down the pipe!
-            for ii, action in enumerate(self._action_stack_):
+            for action in self._action_que_:
                 
+                # If this block was put on standby - stop and go to the next one.
+                if (block.status == 'standby'): 
+                    break
+            
+                # If action applies to all blocks at the same time:
+                if action.type == 'coincident':
+                    if action.count == 0:
+                        
+                        action.count += 1
+                        action.callback(block, action.conditions, action.count) 
+                    
                 # Check if action was already finished for this dataset:
-                if not data.isfinished(action.__name__):
+                if not block.isfinished(action.name):
                     
-                    # Retrieve the parameters of the action
-                    condition = self._condition_stack_[ii]
-
-                    if data.status == 'waiting'
-            
-                    if not condition.get('group'):
+                    # If the action is group action...
+                    if action.type == 'standby':
                         
-                        # Make a begin log record
-                        data.log_begin(action, condition)
+                        # Switch block status to standby
+                        block.status = 'standby'
                         
-                        # Apply action
-                        data = action(data, condition)
-            
-                        # Make an end log record
-                        data.log_end(action, condition)
+                        # if all data is on standby:
+                        if self._is_standby_(): 
+                            block.status = 'pending'
                     
-                    else:
-                        
-                        # Check if data is ready for a group action:
-                        if group_ready:
+                    # Make a begin log record
+                    block.log_begin(action.name, action.conditions)
+                    
+                    action.count += 1
+                                        
+                    # Apply action
+                    action.callback(block, action.conditions, action.count)
                             
-                            # Make a begin log record
-                            for data_ in waiting:
-                                data_.log_begin(action, condition)
-                            
-                            # Apply group action
-                            self._datas_ = action(group_input, condition)
-                            
-                            group_input = []
-                
-                            # Make an end log record
-                            for data_ in waiting:
-                                data_.log_end(action, condition)    
-                                
-                        else:
-                            # Wait for the other datasets to be processed:
-                                
-                            data.status == 'waiting'
-                            ready = False
-                        
-                            group_input.append(data)
-                            
-                        break
-                
-            data.status = 'ready'
-            ready = numpy.prod([data.status == 'ready' for data in self._datas_])            
+                    # Make an end log record
+                    block.log_end(action.name, action.conditions)
+                    
+            block.status = 'ready'    
         
-    def _scan_data_(self, data, condition):
+    def report(self):
+        """
+        Report on what is in the pipe.
+        """
+        
+        print('====================================')
+        print('Pipe Report')
+        print('====================================')
+        print('Action que:')
+        for action in self._action_que_:
+            
+            print('Action: ', action.name, 'was called', action.count, 'times. Finished: ', self._action_ready_(action))
+        
+        print('====================================')
+            
+        print('Data que:')
+        for block in self._data_que_:
+            print('Data type:', block.type, '. Status: ', block.status)
+        
+        print('====================================')
+        
+    def _action_ready_(self, action):
+        """
+        Check if the action was applied to all datasets.
+        """
+        return all([block.isfinished(action.name) for block in self._data_que_])
+        
+    def _is_standby_(self):        
+        """
+        Checks if the pipe is waiting for one or more datasets.
+        """
+        
+        return all([(block.status == 'standby') for block in self._data_que_])
+        
+    def _is_ready_(self):
+        """
+        Check if all operations are finished.
+        """
+        return all([(block.status == 'ready') for block in self._data_que_])
+        
+    def _pick_data_(self):
+        """
+        Pick data from the data pool
+        """
+        # Finds the ones pending:
+        pending = [block for block in self._data_que_ if block.status == 'pending']
+            
+        if len(pending) == 0:                
+            raise Exception('ERROR@!!!!@!! Pipe is empty...')
+                        
+        # Current data in the pipe:            
+        return pending[0]  
+
+    '''
+    >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Callbacks of the pipe <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    '''       
+        
+    def _scan_flexray_(self, data, condition, count):
         """
         Fake operation for scanning data.
         """
         
         print('Scanning data. Output at:', condition.get('path'))
-        pass    
+        pass   
     
-    def _read_data_(self, data, condition):
+    def _read_all_meta_(self, data, condition, count):
+        """
+        Read all meta!
+        """
+        
+        print('Reading all metadata...')
+        
+        for data in self._data_que_:
+            path = data.path
+            samp = condition.get('sampling')
+         
+            if condition.get('volume'):
+                data.meta = flexData.read_meta(os.path.join(path, 'meta.toml'))
+                
+            else:
+                meta = flexData.read_log(path, 'flexray', bins = samp)
+                
+                # Some log files dont have theta information... they screw things up
+                if (len(meta['geometry']['thetas']) == 0):
+                    if data.geometry:
+                        meta['geometry']['thetas'] = data.meta['geometry']['thetas']
+
+                data.meta = meta
+    
+    def _read_volume_(self, data, condition, count):
+        """
+        """
+        path = data.path
+        
+        samp = condition.get('sampling')
+        memmap = condition.get('memmap')
+        
+        if not samp: samp = 1
+        
+        # Read volume:
+        data.data = flexData.read_raw(path, 'vol', skip = samp, sample = [samp, samp], memmap = memmap)  
+        
+        data.meta = flexData.read_meta(os.path.join(path, 'meta.toml')) 
+        
+        data.type = 'volume'
+            
+    def _read_flexray_(self, data, condition, count):
         """
         Read data from disk.
-        Possible conditions: path, samplig, disk_map
-        """
+        Possible conditions: path, samplig, memmap
+        """        
+        
         # Read:    
-            
         print('Reading data...')
         
-        path = condition.get('path')
-        samp = condition.get('samplig')
-        disk_map = condition.get('disk_map')
+        path = data.path
         
+        samp = condition.get('sampling')
+        memmap = condition.get('memmap')
+        
+        # Read projections:    
+            
         data.dark = flexData.read_raw(path, 'di', sample = [samp, samp])
         data.flat = flexData.read_raw(path, 'io', sample = [samp, samp])    
         
-        data.proj = flexData.read_raw(path, 'scan_', skip = samp, sample = [samp, samp], disk_map = disk_map)
+        data.data = flexData.read_raw(path, 'scan_', skip = samp, sample = [samp, samp], memmap = memmap)
     
         data.meta = flexData.read_log(path, 'flexray', bins = samp)   
                 
         data.meta['geometry']['thetas'] = data.meta['geometry']['thetas'][::samp]
 
-        data.proj = flexData.raw2astra(data.proj)    
+        data.data = flexData.raw2astra(data.data)    
+        data.dark = flexData.raw2astra(data.dark)    
+        data.flat = flexData.raw2astra(data.flat)    
+        
+        data.type = 'projections'
         
         # Sometimes flex files don't report theta range...
         if len(data.meta['geometry']['thetas']) == 0:
-            data.meta['geometry']['thetas'] = numpy.linspace(0, 360, data.proj.shape[1])
-            
-        return data
+            data.meta['geometry']['thetas'] = numpy.linspace(0, 360, data.data.shape[1])
         
-    def _process_data_(self, data, condition):
+    def _process_flex_(self, data, condition, count):
         """
         Process data.
         """
         
         print('Processing data...')
         
-        data.proj -= data.dark
-        data.proj /= (data.flat.mean(0) - data.dark)
+        data.data -= data.dark
+        data.data /= (data.flat.mean(1)[:, None, :] - data.dark)
             
-        numpy.log(data.proj, out = data.proj)
-        data.proj *= -1
-        
-        return data
-        
-    def _merge_datas_(self, data, condition):
+        numpy.log(data.data, out = data.data)
+        data.data *= -1
+            
+    def _merge_detectors_(self, data, condition, count):
         """
-        Merge datasets
+        Merge datasets one by one. 
+        Condiitions: geoms, sampling, memmap
         """
-        bins = 2
-    proj_shape = [768, 2000, 972]
+        print('Merging detectors...')        
+                
+        # First call creates a buffer:
+        if count == 1:    
         
-    # Read geometries:    
+            # Merge will kill the data after it is used. So we need to save some stuff:
+            geoms = []
+
+            for data_ in self._data_que_:
+                geoms.append(data_.geometry) 
+    
+            # If there is no buffer set it to the first incoming dataset:                            
+            tot_shape, tot_geom = flexData.tiles_shape(data.data.shape, geoms)  
+
+            # Initialize total:
+            memmap = condition.get('memmap')
+
+            if memmap: 
+                total = numpy.memmap(memmap, dtype='float32', mode='w+', shape = (tot_shape[0],tot_shape[1],tot_shape[2]))       
+            else:
+                total = numpy.zeros(tot_shape, dtype='float32')          
+                
+            self._buffer_['tot_geom'] = tot_geom
+                
+        else:            
+            
+            # Add data to existing buffer:
+            total = self._buffer_['total']    
+            tot_geom = self._buffer_['tot_geom']    
+
+        flexCompute.append_tile(data.data, data.meta['geometry'], total, tot_geom)
         
-    geoms = []    
-    for path in input_paths: 
-        # meta:
-        meta = flex.data.read_log(path, 'flexray', bins = bins) 
-        geoms.append(meta['geometry'])
+        # Display:
+        #flexUtil.display_slice(total, dim = 1,title = 'FDK')  
+        
+        self._buffer_['total'] = total
+        
+        if data.status == 'standby':
+           # Remove data to save RAM
+           self._data_que_.remove(data)
+           del data 
+           gc.collect()
+           
+        else:
+           # If this is the last call:
+               
+           data.data = total
+           data.meta['geometry'] = tot_geom
+
+           # Replace all datasteams with the result: 
+           self._data_que_ = [data,]
+           self._buffer_ = {}
+
+           gc.collect()
+           
+    def _merge_volume_(self, data, condition, count):
+        """
+        Merge datasets one by one. 
+        Condiitions: geoms, sampling, memmap
+        """
+        print('Merging volumes...')        
+        
+        # First initialize the buffer with a large volume:
+        if count == 1:    
+               
+            # Compute indexes for all volumes:    
+            vol_z = []    
+    
+            # Get all vol z positions:
+            for data_ in self._data_que_:
+                if not data_.meta:
+                    raise Exception('Meta data is not initialized for all data blocks! Use read_all_meta!')
                     
-    # Initialize the total data based on all geometries and a single projection stack shape:  
-    tot_shape, tot_geom = flex.data.tiles_shape(proj_shape, geoms)     
-    
-    total = numpy.memmap('/export/scratch3/kostenko/flexbox_swap/swap.prj', dtype='float32', mode='w+', shape = (tot_shape[0],tot_shape[1],tot_shape[2]))    
-    
-    # Read data:
-    for path in input_paths: 
-        # read and process:
-        proj, meta = flex.compute.process_flex(path, options = {'bin':bins, 'disk_map': None})  
+                vol_z.append(data_.geometry.get('vol_vrt'))
+                    
+            vol_z0 = min(vol_z)
+            
+            # Zero coordinate:
+            self._buffer_['vol_z0'] = vol_z0
+
+            # Total volume shape:
+            # Compute offset relative to the volume at the bottom and indexes of the volumes:
+            offset = numpy.int32(flexData.mm2pixel(max(vol_z) - min(vol_z), data.geometry))
+            
+            tot_shape = numpy.array(data.data.shape)
+            tot_shape[0] +=  offset + 1
+                    
+            # Initialize total:
+            memmap = condition.get('memmap')
+            
+            if memmap: 
+                total = numpy.memmap(memmap, dtype='float32', mode='w+', shape = (tot_shape[0],tot_shape[1],tot_shape[2]))       
+            else:
+                total = numpy.zeros(tot_shape, dtype='float32')     
+                
+            self._buffer_['total'] = total    
+
+        else:
+            
+            total = self._buffer_['total']
+            vol_z0 = self._buffer_['vol_z0']
+
+        # Index of the current dataset:
+        vol_z = data.geometry.get('vol_vrt')    
+        offset = numpy.int32(flexData.mm2pixel(vol_z - vol_z0, data.geometry))
         
-        # Correct beam hardeinng:
-        proj = flex.spectrum.equivalent_density(proj, meta['geometry'], energy, spec, compound = 'Al', density = 2.7)     
-    
-        flex.data.append_tile(proj, meta['geometry'], total, tot_geom)
+        index = numpy.arange(0, data.data.shape[0]) + offset
+                
+        total[index] = numpy.max([data.data, total[index]], 0)
         
-        #flex.util.display_slice(total, dim = 1)
+        flexUtil.display_slice(total, dim = 1,title = 'vol merge')  
+
+        self._buffer_['total'] = total 
+
+        # Clear memory:
+        if data.status == 'standby':
+           # Remove data to save RAM
+           self._data_que_.remove(data)
+           del data 
+           gc.collect()
+           
+        else:
+           # If this is the last call:
+               
+           data.data = total
+
+           # Replace all datasteams with the result: 
+           self._data_que_ = [data,]
+           self._buffer_ = {}
+
+           gc.collect()      
+           
+    def _fdk_(self, data, condition, count):        
         
-        # Free memory:
-        del proj
+        vol = flexProject.init_volume(data.data)
+        flexProject.FDK(data.data, vol, data.meta['geometry'])
+        
+        # Replace projection data with volume data:
+        data.data = vol
+     
+    def _crop_(self, data, condition, count):
+        """
+        Crop
+        """
+        print('Applying crop...')
+        crop = condition.get('crop')
+        
+        if crop[0] > 0:
+            data.data = data.data[crop[0]:-crop[0], :, :]
+
+        if crop[1] > 0:
+            data.data = data.data[:, crop[1]:-crop[1], :]
+
+        if crop[2] > 0:
+            data.data = data.data[:,:,crop[2]:-crop[2]]
+        
+    def _cast2int_(self, data, condition, count):
+        """
+        Cast data to int8
+        """        
+        print('Casting data to int...')
+        
+        data.data = flexData.cast2type(data.data, 'uint8', condition.get('bounds'))
+                
+    def _display_(self, data, condition, count):
+        """
+        Display some data
+        """        
+        dim = condition.get('dim')
+        if not dim: 
+            dim = 1
+            
+            # DIsplay single dimension:
+            flexUtil.display_slice(data.data, dim = dim, title = 'Mid slice. Block #%u'%count)
+                
+    def _memmap_(self, data, condition, count):
+        """
+        Map data to disk
+        """
+        
+        print('Mapping data to disk...')
+        
+        # Map to file:
+        file = os.path.join(condition.get('path'), 'block_%u'%count)
+        
+        shape = data.data.shape
+        dtype = data.data.dtype
+        memmap = numpy.memmap(file, dtype=dtype, mode='w+', shape = (shape[0], shape[1], shape[2]))       
+        
+        memmap[:] = data.data[:]
+        data.data = memmap
+        
+        # Clean up memory
         gc.collect()
         
-    # TODO: fill in thetas properly
-    tot_geom['thetas'] = numpy.linspace(0, 360, total.shape[1], dtype = 'float32')
-    
-    # Reaplce the geometry record in meta:
-    meta['geometry'] = tot_geom
-    
-    return total, meta 
-    
-    
-    
-    
-    
-    def _fdk_data_(self, data, condition, prev_out):        
-        pass
+    def _write_flexray_(self, data, condition, count):
+        
+        folder = condition.get('folder')
+                        
+        dim = condition.get('dim')
+        if dim is None:
+            dim = 0
 
+        flexData.write_raw(os.path.join(data.path, '../', folder), 'vol', data.data, dim = dim)
+        flexData.write_meta(os.path.join(data.path, '../', folder, 'meta.toml'), data.meta)  
+'''
 def write_log(filename, log):
     """
     Saves global log file.
@@ -315,5 +701,5 @@ def init_log():
     log = {'tile_acquire': {}, 'tile_fdk': {}}
 
     log['tile_acquire'] = 1
-
+'''
     

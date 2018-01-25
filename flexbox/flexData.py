@@ -48,7 +48,7 @@ def read_flexray(path):
     
     return proj, flat, dark, meta
         
-def read_raw(path, name, skip = 1, sample = [1, 1], x_roi = [], y_roi = [], dtype = 'float32', disk_map = None):
+def read_raw(path, name, skip = 1, sample = [1, 1], x_roi = [], y_roi = [], dtype = 'float32', memmap = None):
     """
     Read tiff files stack and return numpy array.
     
@@ -60,12 +60,13 @@ def read_raw(path, name, skip = 1, sample = [1, 1], x_roi = [], y_roi = [], dtyp
         x_roi ([x0, x1]): horizontal range
         y_roi ([y0, y1]): vertical range
         dtype (str or numpy.dtype): data type to return
-        disk_map (str): if provided, return a disk mapped array to save RAM
+        memmap (str): if provided, return a disk mapped array to save RAM
         
     Returns:
         numpy.array : 3D array with the first dimension representing the image index
         
-    """    
+    """  
+        
     # Retrieve files, sorted by name
     files = _get_files_sorted_(path, name)
     
@@ -76,8 +77,8 @@ def read_raw(path, name, skip = 1, sample = [1, 1], x_roi = [], y_roi = [], dtyp
     file_n = len(files) // skip
     
     # Create a mapped array if needed:
-    if disk_map:
-        data = numpy.memmap(disk_map, dtype='float32', mode='w+', shape = (file_n, sz[0], sz[1]))
+    if memmap:
+        data = numpy.memmap(memmap, dtype='float32', mode='w+', shape = (file_n, sz[0], sz[1]))
         
     else:    
         data = numpy.zeros((file_n, sz[0], sz[1]), dtype = numpy.float32)
@@ -94,7 +95,8 @@ def read_raw(path, name, skip = 1, sample = [1, 1], x_roi = [], y_roi = [], dtyp
             
         if a.ndim > 2:
           a = a.mean(2)
-          
+         
+        #flexUtil.display_slice(a)    
         data[ii, :, :] = a
 
         flexUtil.progress_bar((ii+1) / (numpy.shape(files)[0] // skip))
@@ -117,6 +119,8 @@ def write_raw(path, name, data, dim = 1, dtype = None):
     
     import imageio
     
+    print('Writing data...')
+    
     # Make path if does not exist:
     if not os.path.exists(path):
         os.makedirs(path)
@@ -136,7 +140,7 @@ def write_raw(path, name, data, dim = 1, dtype = None):
           
         # Cast data to another type if needed
         if dtype is not None:
-            img = flexUtil.cast2type(img, dtype, bounds)
+            img = cast2type(img, dtype, bounds)
         
         # Write it!!!
         imageio.imwrite(path_name, img)
@@ -154,7 +158,38 @@ def write_tiff(filename, image):
     if not os.path.exists(path):
         os.makedirs(path)
     
-    imageio.imwrite(filename, image)           
+    imageio.imwrite(filename, image)
+
+def cast2type(array, dtype, bounds = None):
+    """
+    Cast from float to int or float to float rescaling values if needed.
+    """
+    # No? Yes? OK...
+    if array.dtype == dtype:
+        return array
+    
+    # Make sue dtype is not a string:
+    dtype = numpy.dtype(dtype)
+    
+    # If cast to float, simply cast:
+    if dtype.kind == 'f':
+        return numpy.array(array, dtype)
+    
+    # If to integer, rescale:
+    if bounds is None:
+        bounds = [numpy.amin(array), numpy.amax(array)]
+    
+    data_max = numpy.iinfo(dtype).max
+    
+    array -= bounds[0]
+    array *= data_max / (bounds[1] - bounds[0])
+    
+    array[array < 0] = 0
+    array[array > data_max] = data_max
+    
+    array = numpy.array(array, dtype)    
+    
+    return array          
         
 def read_log(path, name, log_type = 'flexray', bins = 1):
     """
@@ -454,7 +489,6 @@ def detector_bounds(shape, geometry):
     bounds['vrt'] = [ymin, ymax]
     
     return bounds 
-
     
 def tiles_shape(shape, geometry_list):
     """
@@ -491,118 +525,7 @@ def tiles_shape(shape, geometry_list):
     geometry['det_vrt'] = (max_y + min_y) / 2
     
     return new_shape, geometry
-    
-def _find_shift_(data_a, data_b):    
-    """
-    Find a small 2D shift between two 3d images.
-    """
-    from skimage import feature
-    import scipy.ndimage
-        
-    # Crop to intersection area:
-    crop = data_b * data_a > 0
-        
-    # If an images have no intersection - shift is zero
-    if crop.sum() == 0:
-        return numpy.zeros(2)
-                
-    x_min = numpy.min(numpy.where(crop.max(0)))
-    x_max = numpy.max(numpy.where(crop.max(0)))
-    y_min = numpy.min(numpy.where(crop.max(1)))
-    y_max = numpy.max(numpy.where(crop.max(1)))
-    
-    data_a_ = data_a[y_min:y_max, x_min:x_max].copy()      
-    data_b_ = data_b[y_min:y_max, x_min:x_max].copy() 
-
-    # Laplace is way better for clipped objects!
-    data_a_ = scipy.ndimage.laplace(data_a_)
-    data_b_ = scipy.ndimage.laplace(data_b_)
-    
-    shift, error, diffphase = feature.register_translation(data_a_, data_b_, 10)
-    
-    # Correlate
-    #corr = numpy.abs(numpy.fft.ifft2(numpy.fft.fft2(data_a_) * 
-    #                                 numpy.conj(numpy.fft.fft2(data_b_))))
-    #corr = numpy.fft.fftshift(corr)
-     
-    #shift = numpy.array(numpy.unravel_index(numpy.argmax(corr), corr.shape)) - numpy.array(corr.shape) // 2
-    
-    return shift
-    
-def append_tile(data, geom, tot_data, tot_geom):
-    """
-    Append a tile to a larger dataset.
-    Args:
-        
-        data: projection stack
-        geom: geometry descritption
-        tot_data: output array
-        tot_geom: output geometry
-        
-    """ 
-    
-    import scipy.ndimage.interpolation as interp
-    
-    print('Stitching a tile...')               
-    
-    # Assuming all projections have equal number of angles and same pixel sizes
-    total_shape = tot_data.shape[::2]
-    det_shape = data.shape[::2]
-    
-    total_size = detector_size(total_shape, tot_geom)
-    det_size = detector_size(det_shape, geom)
-                    
-    # Offset from the left top corner:
-    x0 = tot_geom['det_hrz']
-    y0 = tot_geom['det_vrt']
-    
-    x = geom['det_hrz']
-    y = geom['det_vrt']
-        
-    x_offset = ((x - x0) + total_size[1] / 2 - det_size[1] / 2) / geom['det_pixel']
-    y_offset = ((y - y0) + total_size[0] / 2 - det_size[0] / 2) / geom['det_pixel']
-    
-    # Pad image to get the same size as the total_slice:        
-    pad_x = tot_data.shape[2] - data.shape[2]
-    pad_y = tot_data.shape[0] - data.shape[0]  
-    
-    flexUtil.progress_bar(0)    
-    
-    # Collapce both datasets and compute residual shift
-    total_ = tot_data.sum(1)
-    proj_ = data.sum(1)
-    #total_ = tot_data[:,0,:]
-    #proj_ = data[:,0,:]
-    
-    proj_ = numpy.pad(proj_, ((0, pad_y), (0, pad_x)), mode = 'constant') 
-    
-    #if y_offset > 1:
-    if (x_offset > 1) | (y_offset > 1):
-        print('***')
-        proj_ = interp.shift(proj_, [y_offset+3, x_offset], order = 1)
-    
-    shift = _find_shift_(total_, proj_)
-       
-    print('Found residual shift between tiles:', shift)
-    
-    x_offset += shift[1]
-    y_offset += shift[0]
-   
-    # Apply offsets:
-    for ii in range(tot_data.shape[1]):   
-        
-        # Pad to match sizes:
-        proj = numpy.pad(data[:, ii, :], ((0, pad_y), (0, pad_x)), mode = 'constant')  
-        
-        # Apply shift:
-        if (x_offset > 1) | (y_offset > 1):   
-            proj = interp.shift(proj, [y_offset, x_offset], order = 1)
-                    
-        # Add:
-        tot_data[:, ii, :] = numpy.max((proj, tot_data[:, ii, :]), 0)
-        
-        flexUtil.progress_bar((ii+1) / tot_data.shape[1])
-             
+                 
 def _read_tiff_(file, sample = [1, 1], x_roi = [], y_roi = []):
     """
     Read a single image.
@@ -678,7 +601,7 @@ def _correct_flex_(records):
     
     # Compute the center of the detector:
     roi = numpy.int32(records.get('roi').split(sep=','))
-    records['roi'] = roi
+    records['roi'] = roi.tolist()
 
     centre = [(roi[0] + roi[2]) // 2 - 971, (roi[1] + roi[3]) // 2 - 767]
     
