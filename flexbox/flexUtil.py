@@ -89,7 +89,7 @@ def display_slice(data, index = None, dim = 0, bounds = None, title = None):
     
     # If the image is 2D:
     if data.ndim == 2:
-        plt.figure()
+        plt.figure(figsize=(20,10))
         plt.imshow(data)
         plt.colorbar()
         plt.show()

@@ -415,41 +415,58 @@ def medipix_quadrant_shift(data):
 
     print('Medipix quadrant shift applied.')    
     
-def _find_shift_(data_a, data_b):    
+def _find_shift_(data_ref, data_slave, offset, dim = 1):    
     """
     Find a small 2D shift between two 3d images.
     """
     from skimage import feature
     import scipy.ndimage
-        
-    # Crop to intersection area:
-    crop = data_b * data_a > 0
-        
-    # If an images have no intersection - shift is zero
-    if crop.sum() == 0:
-        return numpy.zeros(2)
-                
-    x_min = numpy.min(numpy.where(crop.max(0)))
-    x_max = numpy.max(numpy.where(crop.max(0)))
-    y_min = numpy.min(numpy.where(crop.max(1)))
-    y_max = numpy.max(numpy.where(crop.max(1)))
-    
-    data_a_ = data_a[y_min:y_max, x_min:x_max].copy()      
-    data_b_ = data_b[y_min:y_max, x_min:x_max].copy() 
-
-    # Laplace is way better for clipped objects!
-    data_a_ = scipy.ndimage.laplace(data_a_)
-    data_b_ = scipy.ndimage.laplace(data_b_)
-    
-    # Shift registration with subpixel accuracy (skimage):
-    shift, error, diffphase = feature.register_translation(data_a_, data_b_, 10)
-    
-    # Correlate
-    #corr = numpy.abs(numpy.fft.ifft2(numpy.fft.fft2(data_a_) * 
-    #                                 numpy.conj(numpy.fft.fft2(data_b_))))
-    #corr = numpy.fft.fftshift(corr)
      
-    #shift = numpy.array(numpy.unravel_index(numpy.argmax(corr), corr.shape)) - numpy.array(corr.shape) // 2
+    shifts = []
+    
+    # Look at a few slices along the dimension dim:
+    for ii in numpy.arange(0, data_slave.shape[dim], 100):
+        
+        # Take a single slice:
+        sl = flexUtil.anyslice(data_ref, ii, dim)    
+        im_ref = numpy.squeeze(data_ref[sl]).copy()
+        sl = flexUtil.anyslice(data_slave, ii, dim)    
+        im_slv = numpy.squeeze(data_slave[sl]).copy()
+        
+        # Make sure that the data we compare is the same size:.        
+
+        im_ref = im_ref[offset[0]:offset[0] + im_slv.shape[0], offset[1]:offset[1] + im_slv.shape[1]]
+        
+        #flexUtil.display_slice(im_ref , title = 'im_ref')    
+        #flexUtil.display_slice(im_slv , title = 'im_slv')    
+        
+        no_zero = (im_ref * im_slv) != 0
+
+        if no_zero.sum() > 0:
+            im_ref *= no_zero
+            im_slv *= no_zero
+            
+            # Crop:
+            im_ref = im_ref[numpy.ix_(no_zero.any(1),no_zero.any(0))]    
+            im_slv = im_slv[numpy.ix_(no_zero.any(1),no_zero.any(0))]                
+
+            #flexUtil.display_slice(im_ref - im_slv, title = 'im_ref')
+                                  
+            # Laplace is way better for clipped objects than comparing intensities!
+            im_ref = scipy.ndimage.laplace(im_ref)
+            im_slv = scipy.ndimage.laplace(im_slv)
+        
+            # Shift registration with subpixel accuracy (skimage):
+            shift, error, diffphase = feature.register_translation(im_ref, im_slv, 10)
+            
+            shifts.append(shift)
+    
+    if shifts != []:        
+        shift = numpy.mean(shifts, 0)    
+        
+        print('Found shift:', shift, 'with STD:', numpy.std(shifts, 0))
+    else:
+        shift = [0, 0]
     
     return shift
     
@@ -486,32 +503,22 @@ def append_tile(data, geom, tot_data, tot_geom):
     x_offset = ((x - x0) + total_size[1] / 2 - det_size[1] / 2) / geom['det_pixel']
     y_offset = ((y - y0) + total_size[0] / 2 - det_size[0] / 2) / geom['det_pixel']
     
+    # Round em up!            
+    x_offset = int(numpy.round(x_offset))                   
+    y_offset = int(numpy.round(y_offset))                   
+                
     # Pad image to get the same size as the total_slice:        
     pad_x = tot_data.shape[2] - data.shape[2]
     pad_y = tot_data.shape[0] - data.shape[0]  
     
-    flexUtil.progress_bar(0)    
-    
     # Collapce both datasets and compute residual shift
-    #total_ = tot_data.sum(1)
-    #proj_ = data.sum(1)
-    total_ = tot_data[:,0,:]
-    proj_ = data[:,0,:]
-    
-    proj_ = numpy.pad(proj_, ((0, pad_y), (0, pad_x)), mode = 'constant') 
-    
-    if (x_offset > 1) | (y_offset > 1):
-        
-        proj_ = interp.shift(proj_, [y_offset, x_offset], order = 1)
-    
-    shift = _find_shift_(total_, proj_)
-       
-    if abs(shift).sum() > 0:
-        print('Found residual shift between tiles:', shift)
+    shift = _find_shift_(tot_data, data, [y_offset, x_offset])
     
     x_offset += shift[1]
     y_offset += shift[0]
-   
+           
+    flexUtil.progress_bar(0) 
+
     # Apply offsets:
     for ii in range(tot_data.shape[1]):   
         
@@ -519,10 +526,28 @@ def append_tile(data, geom, tot_data, tot_geom):
         proj = numpy.pad(data[:, ii, :], ((0, pad_y), (0, pad_x)), mode = 'constant')  
         
         # Apply shift:
-        if (x_offset > 1) | (y_offset > 1):   
+        if (x_offset != 0) | (y_offset != 0):   
             proj = interp.shift(proj, [y_offset, x_offset], order = 1)
                     
-        # Add:
-        tot_data[:, ii, :] = numpy.max((proj, tot_data[:, ii, :]), 0)
+        # Add two images in a smart way:
+        base = tot_data[:, ii, :]    
+        nozero = (numpy.abs(proj - base) / (numpy.abs(proj) + 1e-5) < 0.2)
+        zero = numpy.logical_not(nozero)
+        
+        base[nozero] = numpy.mean((proj, base), 0)[nozero]
+        base[zero] = numpy.max((proj, base), 0)[zero]
+        #base = numpy.max((proj, base), 0)
+
+        tot_data[:, ii, :] = base
         
         flexUtil.progress_bar((ii+1) / tot_data.shape[1])
+        
+def apply_edge_ramp(data, width):
+    '''
+    Apply ramp to the fringe of the tile to reduce artefacts.
+    '''
+    # Pad the data:
+    data = numpy.pad(data, ((width, width), (0,0),(width, width)), mode = 'linear_ramp', end_values = 0)
+    
+    return data
+    

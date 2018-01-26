@@ -38,7 +38,8 @@ class Block:
         
         self.path = path
         
-        self.process_log = []
+        self.todo = []
+        self.done = []
 
     @property
     def geometry(self):
@@ -48,28 +49,24 @@ class Block:
         else:
             return None
         
-    def log_begin(self, name, condition):
+    def schedule(self, name, condition):
         """
-        Operation begin log record.
-        """       
-        self.process_log.append(['started',name, condition, time.ctime()])    
-    
-    def log_end(self, name, condition):
+        Add action to the schedule of this data block:
         """
-        Operation end log record.
-        """ 
-        self.process_log.append(['finished', name, condition, time.ctime()])    
-        
-    def isfinished(self, action_name):
+        self.todo.append([name, condition])    
+     
+    def finish(self, name, condition):
+        """
+        Mark the action as finished
+        """
+        self.todo.remove([name, condition])
+        self.done.append([name, condition, time.ctime()])    
+                
+    def isfinished(self, name, condition):
         """
         Checks if this action was applied and finished.
         """
-        
-        find = [record for record in self.process_log if record[1] == action_name]
-        if find != []:
-            if find[-1][0] == 'finished':
-                
-                return True
+        return not ([name, condition] in self.todo)
                 
 class Action:
     """
@@ -112,18 +109,18 @@ class Pipe:
         self._callback_dictionary_ = {'scan_flexray': self._scan_flexray_, 'read_flexray': self._read_flexray_, 
         'read_all_meta': self._read_all_meta_, 'process_flex': self._process_flex_, 'crop': self._crop_,
         'merge_detectors': self._merge_detectors_, 'merge_volume': self._merge_volume_, 
-        'fdk': self._fdk_, 'write_flexray': self._write_flexray_, 'cast2int':self._cast2int_, 
+        'fdk': self._fdk_,'sirt': self._sirt_, 'write_flexray': self._write_flexray_, 'cast2int':self._cast2int_, 
         'display':self._display_, 'memmap':self._memmap_, 'read_volume': self._read_volume_}
         
         # This one maps function names to condition that have to be used with them:
         self._condition_dictionary_ = {'scan_flexray': ['path'], 'read_flexray': ['sampling'], 
-        'read_all_meta':[],'process_flex': [], 'crop': ['crop'],
+        'read_all_meta':[],'process_flex': [], 'crop': ['crop'],'sirt': [],
         'merge_detectors': ['memmap'], 'merge_volume':['memmap'], 'fdk': [], 'write_flexray': ['folder'], 
         'cast2int':['bounds'], 'display':[], 'memmap':['path'], 'read_volume': []}
         
         # This one maps function names to function types. There are three: batch, standby, coincident
         self._type_dictionary_ = {'scan_flexray': 'batch', 'read_flexray': 'batch', 
-        'read_all_meta':'concurrent', 'process_flex': 'batch', 'crop': 'batch', 
+        'read_all_meta':'concurrent', 'process_flex': 'batch', 'crop': 'batch', 'sirt':'batch',
         'merge_detectors': 'standby', 'merge_volume':'standby', 'fdk': 'batch', 'write_flexray': 'batch', 
         'cast2int':'batch', 'display':'batch', 'memmap':'batch', 'read_volume': 'batch'}
         
@@ -235,7 +232,15 @@ class Pipe:
                 # Reset the que status:
                 for data in self._data_que_:
                     data.status = 'pending'
-        
+                    
+    def refresh_schedules(self):
+        """
+        Refresh todo lists of data blocks
+        """
+        for data in self._data_que_:
+            for act in self._action_que_:
+                data.schedule(act.name, act.conditions)
+                        
     def run(self):
         """
         Run me! Each dataset is picked from _data_que_ array and trickled down the pipe.
@@ -244,9 +249,7 @@ class Pipe:
         # In case connected to other pipes:
         self.refresh_connections()                
         
-        # TEMP:
-        for data in self._data_que_:
-            data.process_log = []
+        self.refresh_schedules()
         
         print(' *** Starting a pipe run *** ')
                 
@@ -269,12 +272,14 @@ class Pipe:
                 # If action applies to all blocks at the same time:
                 if action.type == 'coincident':
                     if action.count == 0:
-                        
+                    
+                        # Apply action:
                         action.count += 1
                         action.callback(block, action.conditions, action.count) 
+                        block.finish(action.name, action.conditions)
                     
                 # Check if action was already finished for this dataset:
-                if not block.isfinished(action.name):
+                if not block.isfinished(action.name, action.conditions):
                     
                     # If the action is group action...
                     if action.type == 'standby':
@@ -286,16 +291,14 @@ class Pipe:
                         if self._is_standby_(): 
                             block.status = 'pending'
                     
-                    # Make a begin log record
-                    block.log_begin(action.name, action.conditions)
-                    
+                    # Action counter increase:
                     action.count += 1
                                         
                     # Apply action
                     action.callback(block, action.conditions, action.count)
                             
                     # Make an end log record
-                    block.log_end(action.name, action.conditions)
+                    block.finish(action.name, action.conditions)
                     
             block.status = 'ready'    
         
@@ -487,11 +490,11 @@ class Pipe:
             # Add data to existing buffer:
             total = self._buffer_['total']    
             tot_geom = self._buffer_['tot_geom']    
-
+        
         flexCompute.append_tile(data.data, data.meta['geometry'], total, tot_geom)
         
         # Display:
-        #flexUtil.display_slice(total, dim = 1,title = 'FDK')  
+        flexUtil.display_slice(total, dim = 1,title = 'total')  
         
         self._buffer_['total'] = total
         
@@ -589,15 +592,32 @@ class Pipe:
            self._buffer_ = {}
 
            gc.collect()      
-           
+    
+    def _sirt_(self, data, condition, count):        
+                
+        shape = data.data.shape
+        vol = numpy.zeros([shape[0]+40, shape[2], shape[2]], dtype = 'float32')
+        
+        options = {'bounds':[0, 1000], 'l2_update':False, 'block_number':100, 'index':'random'}
+        flexProject.SIRT(data.data, vol, data.meta['geometry'], iterations = 5, options = options)
+                
+        # Replace projection data with volume data:
+        data.data = vol 
+        
     def _fdk_(self, data, condition, count):        
         
         vol = flexProject.init_volume(data.data)
-        flexProject.FDK(data.data, vol, data.meta['geometry'])
+
+        # Apply a small ramp to reduce filtering aretfacts:        
+        ramp = condition.get('ramp')
+        if ramp:
+            data.data = flexCompute.apply_edge_ramp(data.data, ramp)
         
+        flexProject.FDK(data.data, vol, data.meta['geometry'])
+
         # Replace projection data with volume data:
         data.data = vol
-     
+                
     def _crop_(self, data, condition, count):
         """
         Crop
