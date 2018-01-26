@@ -546,8 +546,16 @@ def apply_edge_ramp(data, width):
     '''
     Apply ramp to the fringe of the tile to reduce artefacts.
     '''
+    if numpy.size(width)>1:
+        w0 = width[0]
+        w1 = width[1]
+
+    else:   
+        w0 = width
+        w1 = width
+    
     # Pad the data:
-    data = numpy.pad(data, ((width, width), (0,0),(width, width)), mode = 'linear_ramp', end_values = 0)
+    data = numpy.pad(data, ((w0, w0), (0,0),(w1, w1)), mode = 'linear_ramp', end_values = 0)
     
     return data
     
