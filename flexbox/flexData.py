@@ -609,7 +609,7 @@ def _correct_flex_(records):
     records['det_vrt'] -= centre[1] / records.get('binning') * records['det_pixel']
     records['det_hrz'] -= centre[0] / records.get('binning') * records['det_pixel']
     
-    vol_center = (records['det_vrt'] + records['src_vrt']) / 2
+    vol_center = (records['det_vrt'] * records['src2obj'] + records['src_vrt'] * records['det2obj']) / records.get('src2det')
     records['vol_vrt'] = vol_center
     
     maginfication = (records['det2obj'] + records['src2obj']) / records['src2obj']

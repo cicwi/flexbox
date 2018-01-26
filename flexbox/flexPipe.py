@@ -494,7 +494,7 @@ class Pipe:
         flexCompute.append_tile(data.data, data.meta['geometry'], total, tot_geom)
         
         # Display:
-        flexUtil.display_slice(total, dim = 1,title = 'total')  
+        #flexUtil.display_slice(total, dim = 1,title = 'total')  
         
         self._buffer_['total'] = total
         
@@ -571,7 +571,7 @@ class Pipe:
                 
         total[index] = numpy.max([data.data, total[index]], 0)
         
-        flexUtil.display_slice(total, dim = 1,title = 'vol merge')  
+        #flexUtil.display_slice(total, dim = 1,title = 'vol merge')  
 
         self._buffer_['total'] = total 
 
