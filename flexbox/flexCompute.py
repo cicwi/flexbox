@@ -531,12 +531,12 @@ def append_tile(data, geom, tot_data, tot_geom):
                     
         # Add two images in a smart way:
         base = tot_data[:, ii, :]    
-        nozero = (numpy.abs(proj - base) / (numpy.abs(proj) + 1e-5) < 0.2)
-        zero = numpy.logical_not(nozero)
+        #nozero = (numpy.abs(proj - base) / (numpy.abs(proj) + 1e-5) < 0.2)
+        #zero = numpy.logical_not(nozero)
         
-        base[nozero] = numpy.mean((proj, base), 0)[nozero]
-        base[zero] = numpy.max((proj, base), 0)[zero]
-        #base = numpy.max((proj, base), 0)
+        #base[nozero] = numpy.mean((proj, base), 0)[nozero]
+        #base[zero] = numpy.max((proj, base), 0)[zero]
+        base = numpy.max((proj, base), 0)
 
         tot_data[:, ii, :] = base
         
