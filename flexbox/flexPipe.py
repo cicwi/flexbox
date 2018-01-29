@@ -552,9 +552,9 @@ class Pipe:
             memmap = condition.get('memmap')
             
             if memmap: 
-                total = numpy.memmap(memmap, dtype='float32', mode='w+', shape = (tot_shape[0],tot_shape[1],tot_shape[2]))       
+                total = numpy.memmap(memmap, dtype=data.data.dtype, mode='w+', shape = (tot_shape[0],tot_shape[1],tot_shape[2]))       
             else:
-                total = numpy.zeros(tot_shape, dtype='float32')     
+                total = numpy.zeros(tot_shape, dtype=data.data.dtype)     
                 
             self._buffer_['total'] = total    
 

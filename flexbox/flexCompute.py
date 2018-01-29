@@ -436,10 +436,8 @@ def _find_shift_(data_ref, data_slave, offset, dim = 1):
         # Make sure that the data we compare is the same size:.        
 
         im_ref = im_ref[offset[0]:offset[0] + im_slv.shape[0], offset[1]:offset[1] + im_slv.shape[1]]
-        
-        #flexUtil.display_slice(im_ref , title = 'im_ref')    
-        #flexUtil.display_slice(im_slv , title = 'im_slv')    
-        
+    
+        # Find common area:        
         no_zero = (im_ref * im_slv) != 0
 
         if no_zero.sum() > 0:
@@ -463,8 +461,15 @@ def _find_shift_(data_ref, data_slave, offset, dim = 1):
     
     if shifts != []:        
         shift = numpy.mean(shifts, 0)    
+        std = numpy.std(shifts, 0)
         
-        print('Found shift:', shift, 'with STD:', numpy.std(shifts, 0))
+        # Chech that std is at least 4 times less than the shift estimate:
+        if all(numpy.array(shift) > numpy.array(std) * 4):    
+            print('Found shift:', shift, 'with STD:', std)
+        else:
+            print("STD of the automaic shift finder is:", std, ". Automatic shift correction is not applied." )
+            shift = [0, 0]
+
     else:
         shift = [0, 0]
     
