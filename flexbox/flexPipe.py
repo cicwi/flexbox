@@ -175,7 +175,7 @@ class Pipe:
         
         # Remove my memmaps:
         for memmap in self._memmaps_:
-            os.remove(memmap)
+            if os.path.isfile(memmap): os.remove(memmap)
 
     def clean(self):
         """
