@@ -280,7 +280,7 @@ class Pipe:
                     break
             
                 # If action applies to all blocks at the same time:
-                if action.type == 'coincident':
+                if action.type == 'concurrent':
                     if action.count == 0:
                     
                         # Apply action:
@@ -478,8 +478,6 @@ class Pipe:
         Merge datasets one by one. 
         Condiitions: geoms, sampling, memmap
         """
-        print('Merging detectors...')        
-                
         # First call creates a buffer:
         if count == 1:    
         
@@ -628,9 +626,9 @@ class Pipe:
         Find the rotation axis:
         """
         print('Optimization of the rotation axis...')
-        guess = flexCompute.optimize_rotation_center(data.data, data.meta['geometry'], guess = 0, subscale = 8)
+        guess = flexCompute.optimize_rotation_center(data.data, data.meta['geometry'], centre_of_mass = False, subscale = 4)
         
-        print('Old value:', data.meta['geometry']['axs_hrz'], 'new value:', guess)
+        print('Old value:%0.3f' % data.meta['geometry']['axs_hrz'], 'new value: %0.3f' % guess)
         data.meta['geometry']['axs_hrz'] = guess
         
     def _fdk_(self, data, condition, count):        

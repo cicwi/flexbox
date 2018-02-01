@@ -277,7 +277,7 @@ def _optimize_modifier_subsample_(values, projections, geometry, samp = [1, 1], 
     # Valuse of the objective function:
     func_values = numpy.zeros(maxiter)    
     
-    print('Starting a full search from:' , values.min(), 'mm, to', values.max(),'mm')
+    print('Starting a full search from: %0.3f mm' % values.min(), 'to %0.3f mm'% values.max())
     
     ii = 0
     for val in values:
@@ -296,19 +296,19 @@ def optimize_rotation_center(projections, geometry, guess = None, subscale = 1, 
     '''
     
     # Usually a good initial guess is the center of mass of the projection data:
-    if  (centre_of_mass) & (guess is None):  
+    if  guess is None:  
+        if centre_of_mass:
+            
+            print('Computing centre of mass...')
+            guess = flexData.pixel2mm(centre(projections)[2], geometry)
         
-        print('Computing centre of mass...')
+        else:
         
-        guess = flexData.pixel2mm(centre(projections)[2])
-        
-    elif guess is None:
-        
-        guess = geometry('axs_tra')
+            guess = geometry['axs_hrz']
         
     img_pix = geometry['det_pixel'] / ((geometry['src2obj'] + geometry['det2obj']) / geometry['src2obj'])
     
-    print('The initial guess for the rotation axis shift is %0.2e mm' % guess)
+    print('The initial guess for the rotation axis shift is %0.3f mm' % guess)
     
     # Downscale the data:
     while subscale >= 1:
@@ -461,7 +461,7 @@ def _find_shift_(data_ref, data_slave, offset, dim = 1):
         std = numpy.std(shifts, 0)
         
         # Chech that std is at least 2 times less than the shift estimate:
-        if all(numpy.array(shift) > numpy.array(std) * 2):    
+        if all(abs(numpy.array(shift)) > numpy.array(std) * 2):    
             print('Found shift:', shift, 'with STD:', std)
         else:
             print('Found shift:', shift, 'with STD:', std, ". STD too high! Automatic shift correction is not applied." )
