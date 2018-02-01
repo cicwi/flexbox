@@ -97,32 +97,37 @@ class Pipe:
         # Data:
         self._data_que_ = []  
 
-        # If pipe is provided - copy it's action que!
-
         # Buffer for group actions:
         self._buffer_ = {}
 
         # Connection to other pipes:
         self._connections_ = []    
 
+        # Memmaps - need to delete them at the end:
+        self._memmaps_ = []    
+
         # This one maps function names to callback funtions:
         self._callback_dictionary_ = {'scan_flexray': self._scan_flexray_, 'read_flexray': self._read_flexray_, 
         'read_all_meta': self._read_all_meta_, 'process_flex': self._process_flex_, 'crop': self._crop_,
-        'merge_detectors': self._merge_detectors_, 'merge_volume': self._merge_volume_, 
+        'merge_detectors': self._merge_detectors_, 'merge_volume': self._merge_volume_, 'find_rotation': self._find_rotation_,
         'fdk': self._fdk_,'sirt': self._sirt_, 'write_flexray': self._write_flexray_, 'cast2int':self._cast2int_, 
         'display':self._display_, 'memmap':self._memmap_, 'read_volume': self._read_volume_}
         
         # This one maps function names to condition that have to be used with them:
         self._condition_dictionary_ = {'scan_flexray': ['path'], 'read_flexray': ['sampling'], 
-        'read_all_meta':[],'process_flex': [], 'crop': ['crop'],'sirt': [],
+        'read_all_meta':[],'process_flex': [], 'crop': ['crop'],'sirt': [], 'find_rotation':[],
         'merge_detectors': ['memmap'], 'merge_volume':['memmap'], 'fdk': [], 'write_flexray': ['folder'], 
         'cast2int':['bounds'], 'display':[], 'memmap':['path'], 'read_volume': []}
         
         # This one maps function names to function types. There are three: batch, standby, coincident
-        self._type_dictionary_ = {'scan_flexray': 'batch', 'read_flexray': 'batch', 
+        self._type_dictionary_ = {'scan_flexray': 'batch', 'read_flexray': 'batch', 'find_rotation':'batch',
         'read_all_meta':'concurrent', 'process_flex': 'batch', 'crop': 'batch', 'sirt':'batch',
         'merge_detectors': 'standby', 'merge_volume':'standby', 'fdk': 'batch', 'write_flexray': 'batch', 
         'cast2int':'batch', 'display':'batch', 'memmap':'batch', 'read_volume': 'batch'}
+        
+        # If pipe is provided - copy it's action que!
+        if pipe:
+            self.template(pipe)
         
     def template(self, pipe):
         """
@@ -141,7 +146,7 @@ class Pipe:
         Connect to another pipe:copy()
         """
         self._connections_.append(pipe)
-
+        
     def __del__(self):
         """
         Clean up.
@@ -152,7 +157,10 @@ class Pipe:
         """
         Flush the data.
         """
-        
+        # Flush connected pipes:
+        for pipe in self._connections_:
+            pipe.flush()
+            
         # Data:
         self._data_que_.clear()
         
@@ -164,6 +172,10 @@ class Pipe:
         self._buffer_ = {}
 
         gc.collect()
+        
+        # Remove my memmaps:
+        for memmap in self._memmaps_:
+            os.remove(memmap)
 
     def clean(self):
         """
@@ -218,8 +230,6 @@ class Pipe:
         # If connected to more pipes, run them and use their data
         if len(self._connections_) > 0:
             
-            self.flush()
-            
             # Get their outputs
             for pipe in self._connections_:
             
@@ -252,7 +262,7 @@ class Pipe:
         self.refresh_schedules()
         
         print(' *** Starting a pipe run *** ')
-                
+        
         # While all datasets are not ready:
         while not self._is_ready_():
  
@@ -327,7 +337,7 @@ class Pipe:
         """
         Check if the action was applied to all datasets.
         """
-        return all([block.isfinished(action.name) for block in self._data_que_])
+        return all([block.isfinished(action.name, action.conditions) for block in self._data_que_])
         
     def _is_standby_(self):        
         """
@@ -393,11 +403,15 @@ class Pipe:
     
     def _read_volume_(self, data, condition, count):
         """
+        Load the volume stack
         """
         path = data.path
         
         samp = condition.get('sampling')
         memmap = condition.get('memmap')
+        
+        if memmap:
+            self._memmaps_.append(memmap)
         
         if not samp: samp = 1
         
@@ -421,6 +435,9 @@ class Pipe:
         
         samp = condition.get('sampling')
         memmap = condition.get('memmap')
+        
+        if memmap:
+            self._memmaps_.append(memmap)
         
         # Read projections:    
             
@@ -479,6 +496,7 @@ class Pipe:
             memmap = condition.get('memmap')
 
             if memmap: 
+                self._memmaps_.append(memmap)
                 total = numpy.memmap(memmap, dtype='float32', mode='w+', shape = (tot_shape[0],tot_shape[1],tot_shape[2]))       
             else:
                 total = numpy.zeros(tot_shape, dtype='float32')          
@@ -552,6 +570,7 @@ class Pipe:
             memmap = condition.get('memmap')
             
             if memmap: 
+                self._memmaps_.append(memmap)
                 total = numpy.memmap(memmap, dtype=data.data.dtype, mode='w+', shape = (tot_shape[0],tot_shape[1],tot_shape[2]))       
             else:
                 total = numpy.zeros(tot_shape, dtype=data.data.dtype)     
@@ -598,11 +617,21 @@ class Pipe:
         shape = data.data.shape
         vol = numpy.zeros([shape[0]+40, shape[2], shape[2]], dtype = 'float32')
         
-        options = {'bounds':[0, 1000], 'l2_update':False, 'block_number':100, 'index':'random'}
+        options = {'bounds':[0, 10], 'l2_update':False, 'block_number':100, 'index':'random'}
         flexProject.SIRT(data.data, vol, data.meta['geometry'], iterations = 5, options = options)
                 
         # Replace projection data with volume data:
         data.data = vol 
+
+    def _find_rotation_(self, data, condition, count):        
+        """
+        Find the rotation axis:
+        """
+        print('Optimization of the rotation axis...')
+        guess = flexCompute.optimize_rotation_center(data.data, data.meta['geometry'], guess = 0, subscale = 8)
+        
+        print('Old value:', data.meta['geometry']['axs_hrz'], 'new value:', guess)
+        data.meta['geometry']['axs_hrz'] = guess
         
     def _fdk_(self, data, condition, count):        
         
@@ -665,6 +694,8 @@ class Pipe:
         
         shape = data.data.shape
         dtype = data.data.dtype
+        
+        self._memmaps_.append(file)
         memmap = numpy.memmap(file, dtype=dtype, mode='w+', shape = (shape[0], shape[1], shape[2]))       
         
         memmap[:] = data.data[:]

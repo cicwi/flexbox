@@ -277,13 +277,10 @@ def _optimize_modifier_subsample_(values, projections, geometry, samp = [1, 1], 
     # Valuse of the objective function:
     func_values = numpy.zeros(maxiter)    
     
-    print('Starting a full search for: ' , values)
+    print('Starting a full search from:' , values.min(), 'mm, to', values.max(),'mm')
     
     ii = 0
     for val in values:
-        
-        #print('Step %0d / %0d' % (ii+1, maxiter))
-        
         func_values[ii] = _modifier_l2cost_(projections, geometry, samp, val, 'axs_hrz', display)
 
         ii += 1          
@@ -329,7 +326,7 @@ def optimize_rotation_center(projections, geometry, guess = None, subscale = 1, 
         
         guess = _optimize_modifier_subsample_(trial_values, projections, geometry, samp, key = 'axs_hrz', display = False)
                 
-        print('Current guess is %0.2e mm' % guess)
+        print('Current guess is %0.3f mm' % guess)
         
         subscale = subscale // 2
     
@@ -463,11 +460,11 @@ def _find_shift_(data_ref, data_slave, offset, dim = 1):
         shift = numpy.mean(shifts, 0)    
         std = numpy.std(shifts, 0)
         
-        # Chech that std is at least 4 times less than the shift estimate:
-        if all(numpy.array(shift) > numpy.array(std) * 4):    
+        # Chech that std is at least 2 times less than the shift estimate:
+        if all(numpy.array(shift) > numpy.array(std) * 2):    
             print('Found shift:', shift, 'with STD:', std)
         else:
-            print("STD of the automaic shift finder is:", std, ". Automatic shift correction is not applied." )
+            print('Found shift:', shift, 'with STD:', std, ". STD too high! Automatic shift correction is not applied." )
             shift = [0, 0]
 
     else:
