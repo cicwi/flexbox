@@ -10,7 +10,6 @@ This module uses NIST data (embedded in xraylib module) to simulate x-ray spectr
 """
 
 import numpy
-import xraylib
 import matplotlib.pyplot as plt
 
 from . import flexUtil
@@ -37,6 +36,8 @@ def material_refraction(energy, compound, rho):
     Returns:
         float: refraction index in [1/mm]
     """
+    
+    import xraylib
 
     cmp = xraylib.CompoundParser(compound)
 
@@ -68,7 +69,8 @@ def mass_attenuation(energy, compound):
     '''
     Total X-ray absorption for a given compound in cm2g. Energy is given in KeV
     '''
-
+    import xraylib
+    
     # xraylib might complain about types:
     energy = numpy.double(energy)
 
@@ -93,10 +95,11 @@ def compton(energy, compound):
     '''
     Compton scaterring crossection for a given compound in cm2g. Energy is given in KeV
     '''
-
+    
     # xraylib might complain about types:
     energy = numpy.double(energy)
-
+    import xraylib
+    
     if numpy.size(energy) == 1:
         return xraylib.CS_Compt_CP(compound, energy)
     else:
@@ -107,7 +110,8 @@ def rayleigh(energy, compound):
     '''
     Compton scaterring crossection for a given compound in cm2g. Energy is given in KeV
     '''
-
+    import xraylib
+    
     # xraylib might complain about types:
     energy = numpy.double(energy)
 
@@ -121,7 +125,8 @@ def photoelectric(energy, compound):
     '''
     Photoelectric effect for a given compound in cm2g. Energy is given in KeV
     '''
-
+    import xraylib
+    
     # xraylib might complain about types:
     energy = numpy.double(energy)
 
@@ -174,6 +179,8 @@ def nist_names():
     '''
     Get a list of registered compound names understood by nist
     '''
+    import xraylib
+    
     return xraylib.GetCompoundDataNISTList()
 
 
@@ -181,6 +188,8 @@ def find_nist_name(compound_name):
     '''
     Get physical properties of one of the compounds registered in nist database
     '''
+    import xraylib
+    
     return xraylib.GetCompoundDataNISTByName(compound_name)
 
 
@@ -188,6 +197,8 @@ def parse_compound(compund):
     '''
     Parse chemical formula
     '''
+    import xraylib
+    
     return xraylib.CompoundParser(compund)
 
 def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density = 2.7, threshold = None, iterations = 1000, n_bin = 10):

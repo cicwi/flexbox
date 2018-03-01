@@ -1,0 +1,26 @@
+specifies = "geometry"
+type = "parallel"
+dimension = 3
+projection-file-pattern = "projection-*.tiff"
+
+[parameters]
+source-position = [-10.0, 5.0, 5.0]
+detector-position = [20.0, 5.0, 5.0]
+detector-tilt = [[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+detector-size = [10.0, 10.0]
+detector-shape = [256, 256]
+projection-count = 10
+# angles: [0, 0.5, 1.0, ...]
+# ...
+
+# optional
+[volume]
+min-point = [0.0, 0.0, 0.0]
+max-point = [10.0, 10.0, 10.0]
+
+# optional
+[experiment]
+unit-length = 1.0 # the physical coordinates are given in meters
+source-voltage = 1.0
+power = 1.0
+filter-material = 1.0
