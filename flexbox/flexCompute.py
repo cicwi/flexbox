@@ -8,6 +8,7 @@ This module contains calculation routines for pre/post processing.
 """
 import numpy
 from scipy import ndimage
+from scipy import signal
 
 from . import flexUtil
 from . import flexData
@@ -70,9 +71,30 @@ def histogram(data, nbin = 256, plot = True, log = False):
     # Set bin values to the middle of the bin:
     x = (x[0:-1] + x[1:]) / 2
 
-    flexUtil.plot(x, y, semilogy = True, title = 'Histogram')
+    if plot:
+        flexUtil.plot(x, y, semilogy = log, title = 'Histogram')
     
     return x, y
+
+def principal_range(data):
+    """
+    Compute intensity range based on the histogram.
+    """
+    # 256 bins should be sufficient for our dynamic range:
+    x, y = flex.compute.histogram(data.data, nbin = 256, plot = False)
+    
+    # Smooth and find the first and the third maximum:
+    y = ndimage.filters.gaussian_filter(y, sigma = 1)
+    
+    ind = signal.argrelextrema(y, numpy.greater)
+    
+    # Air:
+    a = y[ind[0]]
+    
+    # Some material:
+    b = y[ind[3]] 
+    
+    return [a, b] 
     
 def centre(data):
         """

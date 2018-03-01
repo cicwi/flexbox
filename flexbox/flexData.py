@@ -296,8 +296,10 @@ def raw2astra(array):
     """    
     # Don't apply ascontignuousarray on memmaps!    
     array = numpy.transpose(array, [1,0,2])
-    array = numpy.flip(array, 0)
     
+    #Flip:
+    array = array[::-1]    
+        
     return array
 
 def pixel2mm(value, geometry):

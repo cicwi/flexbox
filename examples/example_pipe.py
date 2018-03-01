@@ -51,3 +51,13 @@ for ii in range(6):
 pipe_vol.run()
 pipe_vol.report()
 pipe_vol.flush()
+
+#%% Load and register volumes:
+import flexbox as flex
+    
+pipe = flex.pipe.Pipe()   
+pipe_proj.schedule('read_volume', {'sampling': 1})
+pipe_proj.schedule('read_all_meta', {'sampling': 1})
+pipe_proj.schedule('equalize_resolution')
+pipe_proj.schedule('register_volumes')
+pipe_vol.schedule('write_flexray', {'folder':'fdk_reg', 'dim':0})
