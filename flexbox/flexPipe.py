@@ -9,6 +9,8 @@ This module allows to create a pipeline of operations. Each data unit trickles t
 """
 #import os
 import numpy
+from scipy import ndimage
+from scipy import signal
 import time
 import gc
 import os
@@ -86,7 +88,9 @@ class Pipe:
     """
     The Pipe is handling the data que and the action que. 
     Data que consists of blocks that fall down the action que until they hit the bottom or a group action.
-    """     
+    """ 
+    
+    
     def __init__(self, pipe = None):
         """
         Initialize the Pipe!
@@ -111,19 +115,21 @@ class Pipe:
         'read_all_meta': self._read_all_meta_, 'process_flex': self._process_flex_, 'crop': self._crop_,
         'merge_detectors': self._merge_detectors_, 'merge_volume': self._merge_volume_, 'find_rotation': self._find_rotation_,
         'fdk': self._fdk_,'sirt': self._sirt_, 'write_flexray': self._write_flexray_, 'cast2int':self._cast2int_, 
-        'display':self._display_, 'memmap':self._memmap_, 'read_volume': self._read_volume_}
+        'display':self._display_, 'memmap':self._memmap_, 'read_volume': self._read_volume_, 'equalize_histogram': self._equalize_histogram_,
+        'equalize_resolution': self._equalize_resolution_, 'register_volumes': _register_volumes_}
         
         # This one maps function names to condition that have to be used with them:
-        self._condition_dictionary_ = {'scan_flexray': ['path'], 'read_flexray': ['sampling'], 
-        'read_all_meta':[],'process_flex': [], 'crop': ['crop'],'sirt': [], 'find_rotation':[],
+        self._condition_dictionary_ = {'scan_flexray': ['path'], 'read_flexray': ['sampling'], 'register_volumes'[], 
+        'read_all_meta':[],'process_flex': [], 'crop': ['crop'],'sirt': [], 'find_rotation':[], 'equalize_histogram':[]
         'merge_detectors': ['memmap'], 'merge_volume':['memmap'], 'fdk': [], 'write_flexray': ['folder'], 
-        'cast2int':['bounds'], 'display':[], 'memmap':['path'], 'read_volume': []}
+        'cast2int':['bounds'], 'display':[], 'memmap':['path'], 'read_volume': [], 'equalize_resolution':[]}
         
         # This one maps function names to function types. There are three: batch, standby, coincident
         self._type_dictionary_ = {'scan_flexray': 'batch', 'read_flexray': 'batch', 'find_rotation':'batch',
-        'read_all_meta':'concurrent', 'process_flex': 'batch', 'crop': 'batch', 'sirt':'batch',
+        'read_all_meta':'concurrent', 'process_flex': 'batch', 'crop': 'batch', 'sirt':'batch','equalize_resolution':'batch'
         'merge_detectors': 'standby', 'merge_volume':'standby', 'fdk': 'batch', 'write_flexray': 'batch', 
-        'cast2int':'batch', 'display':'batch', 'memmap':'batch', 'read_volume': 'batch'}
+        'cast2int':'batch', 'display':'batch', 'memmap':'batch', 'read_volume': 'batch','register_volumes':'batch', 
+        'equalize_histogram':'batch'}
         
         # If pipe is provided - copy it's action que!
         if pipe:
@@ -528,7 +534,7 @@ class Pipe:
 
            # Replace all datasteams with the result: 
            self._data_que_ = [data,]
-           self._buffer_ = {}
+           self._buffer_['total'] = None
 
            gc.collect()
            
@@ -601,14 +607,13 @@ class Pipe:
            
         else:
            # If this is the last call:
-               
            data.data = total
 
            # Replace all datasteams with the result: 
            self._data_que_ = [data,]
-           self._buffer_ = {}
+           self._buffer_['total'] = None
 
-           gc.collect()      
+           gc.collect()
     
     def _sirt_(self, data, condition, count):        
                 
@@ -703,7 +708,9 @@ class Pipe:
         gc.collect()
         
     def _write_flexray_(self, data, condition, count):
-        
+        """
+        Write the raw and meta files to disk.
+        """
         folder = condition.get('folder')
                         
         dim = condition.get('dim')
@@ -712,6 +719,75 @@ class Pipe:
 
         flexData.write_raw(os.path.join(data.path, '../', folder), 'vol', data.data, dim = dim)
         flexData.write_meta(os.path.join(data.path, '../', folder, 'meta.toml'), data.meta)  
+        
+    def _register_volumes_(self, data, condition, count):
+        """
+        Register all volumes to the first one in the que.
+        """
+        print('Volume registration in progress...')
+        
+        # Compute the histogram of the first dataset:
+        if count == 1:
+            self._buffer_['fixed'] = data.data
+                         
+        else:
+            flexCompute.registartion_moments(self._buffer_['fixed'], data.data)
+            
+            flexCompute.registration_optimizer(self._buffer_['fixed'], data.data)
+            
+        # Last call:   
+        if self._data_que_.size == (count + 1):  
+            self._buffer_['fixed'] = None
+        
+    def _equalize_histogram_(self, data, condition, count):
+        """
+        Equalize the intensity levels based on histograms.
+        """
+        print('Equalizing intensities...')
+        
+        # Compute the histogram of the first dataset:
+        if count == 1:
+            
+            rng = flexCompute.principal_range(data.data)
+            self._buffer_['range'] = rng
+                         
+         else:
+             
+         # Rescale intensities:
+         rng_0 = self._buffer_['range']
+         rng = flexCompute.principal_range(data.data)    
+             
+         data.data -= (rng[0] - rng_0[0])
+         data.data *= (rng_0[1] - rng_0[0]) / (rng[1] - rng[0]) 
+        
+         # Last call:   
+         if self._data_que_.size == (count + 1):
+            self._buffer_['range'] = None 
+         
+    def _equalize_resolution_(self, data, condition, count):
+        """
+        Scale all datasets to the same pixle size. 
+        """
+        
+        print('Equalizing pixel sizes...')        
+        
+        # Find the biggest pixel size:
+        pixels = []
+        
+        for data_ in self._data_que_:
+            pixles.append(data_.meta['geometry']['img_pixel'])
+            
+        pix_max = max(pixels)    
+            
+        # Downsample to that pixel size:
+        fact = data.meta['geometry']['img_pixel'] / pix_max
+        
+        if fact != 1:
+                
+            data.data = ndimage.interpolation.zoom(data.data, fact)
+            data.meta['geometry']['img_pixel'] /= fact
+            data.meta['geometry']['det_pixel'] /= fact
+        
 '''
 def write_log(filename, log):
     """
