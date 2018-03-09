@@ -112,7 +112,7 @@ class Pipe:
 
         # This one maps function names to callback funtions:
         self._callback_dictionary_ = {'scan_flexray': self._scan_flexray_, 'read_flexray': self._read_flexray_, 
-        'read_all_meta': self._read_all_meta_, 'process_flex': self._process_flex_, 'shape': self._shape_,
+        'read_all_meta': self._read_all_meta_, 'process_flex': self._process_flex_, 'shape': self._shape_, 'crop': self._crop_,
         'merge_detectors': self._merge_detectors_, 'merge_volume': self._merge_volume_, 'find_rotation': self._find_rotation_,
         'fdk': self._fdk_,'sirt': self._sirt_, 'write_flexray': self._write_flexray_, 'cast2int':self._cast2int_, 
         'display':self._display_, 'memmap':self._memmap_, 'read_volume': self._read_volume_, 'equalize_histogram': self._equalize_histogram_,
@@ -121,13 +121,13 @@ class Pipe:
         # This one maps function names to condition that have to be used with them:
         self._condition_dictionary_ = {'scan_flexray': ['path'], 'read_flexray': ['sampling'], 'register_volumes':[], 
         'read_all_meta':[],'process_flex': [], 'shape': ['shape'],'sirt': [], 'find_rotation':[], 'equalize_histogram':[],
-        'merge_detectors': ['memmap'], 'merge_volume':['memmap'], 'fdk': [], 'write_flexray': ['folder'], 
+        'merge_detectors': ['memmap'], 'merge_volume':['memmap'], 'fdk': [], 'write_flexray': ['folder'], 'crop': ['crop'],
         'cast2int':['bounds'], 'display':[], 'memmap':['path'], 'read_volume': [], 'equalize_resolution':[]}
         
         # This one maps function names to function types. There are three: batch, standby, coincident
         self._type_dictionary_ = {'scan_flexray': 'batch', 'read_flexray': 'batch', 'find_rotation':'batch',
         'read_all_meta':'concurrent', 'process_flex': 'batch', 'shape': 'batch', 'sirt':'batch','equalize_resolution':'batch',
-        'merge_detectors': 'standby', 'merge_volume':'standby', 'fdk': 'batch', 'write_flexray': 'batch', 
+        'merge_detectors': 'standby', 'merge_volume':'standby', 'fdk': 'batch', 'write_flexray': 'batch', 'crop': 'batch', 
         'cast2int':'batch', 'display':'batch', 'memmap':'batch', 'read_volume': 'batch','register_volumes':'batch', 
         'equalize_histogram':'batch'}
         
@@ -650,7 +650,7 @@ class Pipe:
         """
         Shape the data to a given shape.
         """
-        print('Applying crop...')
+        print('Applying shape...')
         
         shape = condition.get('shape')
                 
@@ -668,7 +668,19 @@ class Pipe:
                 elif crop > 0:
                     # Pad case:
                     data.data = flexUtil.pad(data.data, dim, crop, symmetric = True)
+
+    def _crop_(self, data, condition, count):
+        """
+        Crop the data.
+        """
+        print('Applying crop...')
         
+        crop = condition.get('crop')
+         
+        for dim in range(3):
+            if crop[dim] != 0:
+                data.data = flexUtil.crop(data.data, dim, crop[dim], symmetric = True)                   
+                    
     def _cast2int_(self, data, condition, count):
         """
         Cast data to int8

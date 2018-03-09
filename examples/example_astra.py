@@ -37,7 +37,7 @@ vol = numpy.zeros([50, 2000, 2000], dtype = 'float32')
 
 # Initialize ASTRA geometries:
 vol_geom = flex.data.astra_vol_geom(meta['geometry'], vol.shape)
-proj_geom = flex.data.astra_proj_geom(meta['geometry'], proj.shape[::2])
+proj_geom = flex.data.astra_proj_geom(meta['geometry'], proj.shape)
         
 # This is ASTRAAA!!!
 sin_id = astra.data3d.link('-sino', proj_geom, numpy.ascontiguousarray(proj))

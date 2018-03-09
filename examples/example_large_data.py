@@ -15,7 +15,7 @@ path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/
 
 dark = flexData.read_raw(path, 'di')
 flat = flexData.read_raw(path, 'io')    
-proj = flexData.read_raw(path, 'scan_', disk_map = '/export/scratch3/kostenko/flexbox_swap/swap.prj')
+proj = flexData.read_raw(path, 'scan_', memmap = '/export/scratch3/kostenko/flexbox_swap/swap.prj')
 
 meta = flexData.read_log(path, 'flexray')   
  

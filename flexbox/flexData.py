@@ -531,6 +531,10 @@ def tiles_shape(shape, geometry_list):
     geometry['det_hrz'] = (max_x + min_x) / 2
     geometry['det_vrt'] = (max_y + min_y) / 2
     
+    # Update volume center:
+    geometry['vol_vrt'] = (geometry['det_vrt'] * geometry['src2obj'] + geometry['src_vrt'] * geometry['det2obj']) / geometry.get('src2det')
+    geometry['vol_hrz'] = (geometry['det_hrz'] + geometry['src_hrz']) / 2
+
     return new_shape, geometry
                  
 def _read_tiff_(file, sample = [1, 1], x_roi = [], y_roi = []):

@@ -258,7 +258,7 @@ def affine(data, matrix, shift):
     T0 = numpy.array(data.shape) // 2
     T1 = numpy.dot(matrix, T0 + shift)
 
-    return ndimage.interpolation.affine_transform(data, matrix, offset = T0-T1, order = 3)
+    return ndimage.interpolation.affine_transform(data, matrix, offset = T0-T1, order = 1)
     
 def register_volumes(fixed, moving, subsamp = 2, use_CG = True, monochrome = False):
     '''
@@ -828,6 +828,7 @@ def _find_shift_(data_ref, data_slave, offset, dim = 1):
     import scipy.ndimage
      
     shifts = []
+    errors = []
     
     # Look at a few slices along the dimension dim:
     for ii in numpy.arange(0, data_slave.shape[dim], 100):
@@ -863,6 +864,9 @@ def _find_shift_(data_ref, data_slave, offset, dim = 1):
             shift, error, diffphase = feature.register_translation(im_ref, im_slv, 10)
             
             shifts.append(shift)
+
+    print('errors', errors)        
+    print('shifts', shifts)        
     
     if shifts != []:        
         shift = numpy.mean(shifts, 0)    
@@ -933,22 +937,36 @@ def append_tile(data, geom, tot_data, tot_geom):
     for ii in range(tot_data.shape[1]):   
         
         # Pad to match sizes:
-        proj = numpy.pad(data[:, ii, :], ((0, pad_y), (0, pad_x)), mode = 'constant')  
+        new = numpy.pad(data[:, ii, :], ((0, pad_y), (0, pad_x)), mode = 'constant')  
         
         # Apply shift:
         if (x_offset != 0) | (y_offset != 0):   
-            proj = interp.shift(proj, [y_offset, x_offset], order = 1)
+            new = interp.shift(new, [y_offset, x_offset], order = 1)
                     
         # Add two images in a smart way:
-        base = tot_data[:, ii, :]    
+        base = tot_data[:, ii, :]  
+
+        # Compute proportions of the total data and new projection:
+        base_dist = ndimage.distance_transform_bf(base)    
+        new_dist =  ndimage.distance_transform_bf(new)    
+                 
+        # Trim edges:
+        base_dist -= 1    
+        new_dist -= 1
+        
+        base_dist *= base_dist > 0
+        new_dist *= new_dist > 0
+        
         #nozero = (numpy.abs(proj - base) / (numpy.abs(proj) + 1e-5) < 0.2)
         #zero = numpy.logical_not(nozero)
         
         #base[nozero] = numpy.mean((proj, base), 0)[nozero]
         #base[zero] = numpy.max((proj, base), 0)[zero]
-        base = numpy.max((proj, base), 0)
+        #base = numpy.max((new, base), 0)
 
-        tot_data[:, ii, :] = base
+        norm = (base_dist + new_dist)
+        norm[norm == 0] = numpy.inf
+        tot_data[:, ii, :] = ((base_dist * base) + (new_dist * new)) / norm
         
         flexUtil.progress_bar((ii+1) / tot_data.shape[1])
         
