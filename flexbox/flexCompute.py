@@ -828,10 +828,9 @@ def _find_shift_(data_ref, data_slave, offset, dim = 1):
     import scipy.ndimage
      
     shifts = []
-    errors = []
     
     # Look at a few slices along the dimension dim:
-    for ii in numpy.arange(0, data_slave.shape[dim], 100):
+    for ii in numpy.arange(0, data_slave.shape[dim], 10):
         
         # Take a single slice:
         sl = flexUtil.anyslice(data_ref, ii, dim)    
@@ -865,15 +864,35 @@ def _find_shift_(data_ref, data_slave, offset, dim = 1):
             
             shifts.append(shift)
 
-    print('errors', errors)        
-    print('shifts', shifts)        
+    shifts = numpy.array(shifts)            
     
-    if shifts != []:        
+    if shifts.size > 0:        
+        
+        # prune around mean:
+        mean = numpy.mean(shifts, 0)    
+        
+        #print('shifts', shifts)
+        #print('mean', mean)
+        
+        error = (shifts - mean[None, :])
+        #print('error', error)
+        
+        error = numpy.sqrt(error[:, 0] ** 2 + error[:, 1] ** 2)
+        error = error / numpy.sqrt(mean[None, 0]**2+mean[None, 1])
+        
+        #print('error**', error)
+        
+        shifts = shifts[error < 1]
+
+        # total:        
         shift = numpy.mean(shifts, 0)    
         std = numpy.std(shifts, 0)
         
+        shift_norm = numpy.sqrt(shift[0]**2+shift[1]**2)
+        std_norm = numpy.sqrt(std[0]**2+std[1]**2)
+
         # Chech that std is at least 2 times less than the shift estimate:
-        if all(abs(numpy.array(shift)) > numpy.array(std) * 2):    
+        if std_norm  < shift_norm / 2:    
             print('Found shift:', shift, 'with STD:', std)
         else:
             print('Found shift:', shift, 'with STD:', std, ". STD too high! Automatic shift correction is not applied." )
@@ -947,8 +966,8 @@ def append_tile(data, geom, tot_data, tot_geom):
         base = tot_data[:, ii, :]  
 
         # Compute proportions of the total data and new projection:
-        base_dist = ndimage.distance_transform_bf(base)    
-        new_dist =  ndimage.distance_transform_bf(new)    
+        base_dist = ndimage.distance_transform_bf(base != 0)    
+        new_dist =  ndimage.distance_transform_bf(new != 0)    
                  
         # Trim edges:
         base_dist -= 1    
@@ -966,7 +985,20 @@ def append_tile(data, geom, tot_data, tot_geom):
 
         norm = (base_dist + new_dist)
         norm[norm == 0] = numpy.inf
+
+        #flexUtil.display_slice(base_dist, title = 'base_dist')
+        #flexUtil.display_slice(base, title = 'base')
+        
+        #flexUtil.display_slice(new_dist, title = 'new_dist')
+        #flexUtil.display_slice(new, title = 'new')
+        
+        #flexUtil.display_slice(((base_dist * base) + (new_dist * new)) / norm, title = 'added')
+        
         tot_data[:, ii, :] = ((base_dist * base) + (new_dist * new)) / norm
+
+        #tot_data[:, ii, :] = tot_data[:, ii, :] + new_dist
+
+        #tot_data[:, ii, :] = numpy.max((new, base), 0)
         
         flexUtil.progress_bar((ii+1) / tot_data.shape[1])
         
