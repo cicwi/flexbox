@@ -105,7 +105,7 @@ def read_raw(path, name, skip = 1, sample = [1, 1], x_roi = [], y_roi = [], dtyp
 
     return data    
 
-def write_raw(path, name, data, dim = 1, dtype = None):
+def write_raw(path, name, data, dim = 1, skip = 1, dtype = None):
     """
     Write tiff stack.
     
@@ -114,6 +114,7 @@ def write_raw(path, name, data, dim = 1, dtype = None):
         name (str): first part of the files name
         data (numpy.array): data to write
         dim (int): dimension along which array is separated into images
+        skip (int): how many images to skip in between
         dtype (type): forse this data type       
     """
     
@@ -126,16 +127,16 @@ def write_raw(path, name, data, dim = 1, dtype = None):
         os.makedirs(path)
     
     # Write files stack:    
-    file_num = data.shape[dim]
+    file_num = int(numpy.ceil(data.shape[dim] / skip))
 
     bounds = [data.min(), data.max()]
     
     for ii in range(file_num):
         
-        path_name = os.path.join(path, name + '_%06u.tiff'%ii)
+        path_name = os.path.join(path, name + '_%06u.tiff'% (ii*skip))
         
         # Extract one slice from the big array
-        sl = flexUtil.anyslice(data, ii, dim)
+        sl = flexUtil.anyslice(data, ii * skip, dim)
         img = data[sl]
           
         # Cast data to another type if needed
@@ -206,6 +207,7 @@ def read_log(path, name, log_type = 'flexray', bins = 1):
         settings : physical settings - voltage, current, exposure
         description : lyrical description of the data
     """
+    #print(path)
     
     if log_type != 'flexray': raise ValueError('Non-flexray log files are not supported yet. File a complaint form to the support team.')
     
@@ -215,23 +217,20 @@ def read_log(path, name, log_type = 'flexray', bins = 1):
     # Read recods from the file:
     geometry, settings, description = _parse_keywords_(path, 'settings.txt', dictionary, separator = ':')
     
+    # Check if all th relevant fields are there:
+    _sanity_check_(geometry)
+    
     # Apply Flexray-specific corrections and restructure records:
     geometry = _correct_flex_(geometry) 
     
-    # Generate thetas explicitly:
-    if geometry.get('theta_count') is None:
-        ValueError('theta_count was not foud in the log file! thetas will not be initialized.')
-    else:    
-        geometry['thetas'] = numpy.linspace(geometry.get('first_angle'), geometry.get('last_angle'), geometry.get('theta_count'), dtype = 'float32')
-    
     # Make sure that records that were not found are set to zeroes:
-    for key in geometry.keys():
-        if type(geometry[key]) is list:
-            for ii in range(len(geometry[key])):
-                if geometry[key][ii] is None: 
-                    geometry[key][ii] = 0
+    #for key in geometry.keys():
+    #    if type(geometry[key]) is list:
+    #        for ii in range(len(geometry[key])):
+    #            if geometry[key][ii] is None: 
+    #                geometry[key][ii] = 0
                 
-        elif geometry[key] is None: geometry[key] = 0  
+    #    elif geometry[key] is None: geometry[key] = 0  
 
     # Apply binning if needed:
     geometry['det_pixel'] *= bins
@@ -361,15 +360,16 @@ def astra_proj_geom(geometry, data_shape, index = None, sample = [1, 1]):
     Generate the vector that describes positions of the source and detector.
     """
     # Basic geometry:
-    det_count_x = data_shape[1]
+    det_count_x = data_shape[2]
     det_count_z = data_shape[0]
+    theta_count = data_shape[1]
 
     det_pixel = geometry['det_pixel'] * numpy.array(sample)
     
     src2obj = geometry['src2obj']
     det2obj = geometry['det2obj']
 
-    thetas = geometry['thetas'] / 180 * numpy.pi
+    thetas = numpy.linspace(geometry.get('theta_min'), geometry.get('theta_max'),theta_count, dtype = 'float32') / 180 * numpy.pi
 
     # Inintialize ASTRA projection geometry to import vector from it
     if (index is not None):
@@ -459,13 +459,18 @@ def create_geometry(src2obj, det2obj, det_pixel, theta_range, theta_count):
     'vol_rot':[0. ,0. ,0.], 'vol_hrz':0., 'vol_vrt':0., 'vol_mag':0.,
     'src2obj': src2obj, 'det2obj':det2obj, 'unit':'millimetre', 'type':'flex', 'binning': 1}
     
+    geometry['src2det'] = geometry.get('src2obj') + geometry.get('det2obj')
+    
     # Add img_pixel:
     if src2obj != 0:    
         m = (src2obj + det2obj) / src2obj
         geometry['img_pixel'] = det_pixel / m
+    else:
+        geometry['img_pixel'] = 0
 
     # Generate thetas explicitly:
-    geometry['thetas'] = numpy.linspace(theta_range[0], theta_range[1], theta_count, dtype = 'float32') 
+    geometry['theta_max'] = theta_range[1]
+    geometry['theta_min'] = theta_range[0]
 
     return geometry 
         
@@ -564,8 +569,8 @@ def _get_flexray_keywords_():
                     'tra_tube':'src_hrz',
                     
                     '# projections':'theta_count',
-                    'last angle':'last_angle',
-                    'start angle':'first_angle',
+                    'last angle':'theta_max',
+                    'start angle':'theta_min',
                     
                     'binning value':'binning',
                     'roi (ltrb)':'roi'}
@@ -586,12 +591,25 @@ def _get_flexray_keywords_():
                     
     return [geometry, settings, description]                
    
+def _sanity_check_(records):
+    
+    minimum_set = ['img_pixel', 'src2det', 'src2obj']
+
+    for word in minimum_set:
+        if word not in records: raise ValueError('Missing records in the meta data. Something wrong with the log file?')
+        
+        if type(records[word]) != float: raise ValueError('Wrong records in the meta data. Something wrong with the log file?')
+
 def _correct_flex_(records):   
     """
     Apply some Flexray specific corrections to the geometry record.
     """
     #binning = records['binning']
-    
+    #print(records.get('src2det'))
+    #print(records.get('src2obj'))
+    #print(records.get('src2det') - records.get('src2obj') )
+    #print('***')
+        
     records['det2obj'] = records.get('src2det') - records.get('src2obj')    
     records['img_pixel'] = records.get('img_pixel') * _parse_unit_('[um]') 
     
@@ -647,16 +665,29 @@ def _parse_keywords_(path, file_mask, dictionary, separator = ':'):
     settings = {}
     description = {}
 
+    # Keep record of names to avoid reading doubled-entries:
+    names = []    
+
     # Loop to read the file record by record:
     with open(log_file, 'r') as logfile:
         for line in logfile:
             name, var = line.partition(separator)[::2]
             name = name.strip().lower()
             
-            # If name contains one of the keys (names can contain other stuff like units):
-            _interpret_record_(name, var, dictionary[0], geometry)
-            _interpret_record_(name, var, dictionary[1], settings)
-            _interpret_record_(name, var, dictionary[2], description)    
+            # Dont mind empty lines:
+            if re.search('[a-zA-Z]', name):
+            
+                # Check if name occured before:
+                if (name in names) & ('date' not in name): 
+                    
+                    print('Double occurance of:', name, '. Stopping.')
+                    break
+                names.append(name)
+                
+                # If name contains one of the keys (names can contain other stuff like units):
+                _interpret_record_(name, var, dictionary[0], geometry)
+                _interpret_record_(name, var, dictionary[1], settings)
+                _interpret_record_(name, var, dictionary[2], description)    
                
     return geometry, settings, description 
     
@@ -672,16 +703,10 @@ def _interpret_record_(name, var, keywords, output):
         # Look for unit description in the name:
         factor = _parse_unit_(name)
 
-        #if geom_key[0] in output:
-        #    print('*: ', geom_key[0])
-        #    print('**: ', output)
-        #    
-        #    print('WARNING! Geometry record found twice in the log file!')
-            
-        # If needed to separate the var and save the number of save the whole string:   
+        # If needed to separate the var and save the number of save the whole string:               
         try:
             output[geom_key[0]] = float(var.split()[0]) * factor
-
+            
         except:
             output[geom_key[0]] = var
 

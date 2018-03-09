@@ -111,7 +111,7 @@ def backproject(projections, volume, geometry, algorithm = 'BP3D_CUDA', operatio
         
         # Initialize ASTRA geometries:
         vol_geom = flexData.astra_vol_geom(geometry, volume.shape)
-        proj_geom = flexData.astra_proj_geom(geometry, projections.shape[::2])    
+        proj_geom = flexData.astra_proj_geom(geometry, projections.shape)    
         
         _backproject_block_(projections, volume, proj_geom, vol_geom, algorithm, operation)
         
@@ -130,7 +130,7 @@ def backproject(projections, volume, geometry, algorithm = 'BP3D_CUDA', operatio
             i1 = min((ii * l + l), n+1)
             
             # Extract a block:
-            proj_geom = flexData.astra_proj_geom(geometry, projections.shape[::2], numpy.arange(i0, i1))    
+            proj_geom = flexData.astra_proj_geom(geometry, projections.shape, numpy.arange(i0, i1))    
             
             block = numpy.ascontiguousarray(projections[:, i0:i1,:])
             
@@ -147,7 +147,7 @@ def forwardproject(projections, volume, geometry, operation = '+'):
         
         # Initialize ASTRA geometries:
         vol_geom = flexData.astra_vol_geom(geometry, volume.shape)
-        proj_geom = flexData.astra_proj_geom(geometry, projections.shape[::2])
+        proj_geom = flexData.astra_proj_geom(geometry, projections.shape)
         
         _forwardproject_block_(projections, volume, proj_geom, vol_geom, operation)
         
@@ -158,7 +158,7 @@ def forwardproject(projections, volume, geometry, operation = '+'):
         l = n // 10
         
         # Initialize ASTRA geometries:
-        proj_geom = flexData.astra_proj_geom(geometry, projections.shape[::2])    
+        proj_geom = flexData.astra_proj_geom(geometry, projections.shape)    
         
         # Loop over blocks:
         for ii in range(n // l):
@@ -280,7 +280,7 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
         if index is []: break
 
         # Extract a block:
-        proj_geom = flexData.astra_proj_geom(geometry, projections.shape[::2], index = index)    
+        proj_geom = flexData.astra_proj_geom(geometry, projections.shape, index = index)    
         
         # Copy data to a block or simply pass a pointer to data itself if block is one.
         if (mode == 'sequential') & (block_number == 1):
@@ -361,7 +361,7 @@ def _em_step_(projections, prj_weight, volume, geometry, options):
         if index is []: break
 
         # Extract a block:
-        proj_geom = flexData.astra_proj_geom(geometry, projections.shape[::2], index = index)    
+        proj_geom = flexData.astra_proj_geom(geometry, projections.shape, index = index)    
         
         # Copy data to a block or simply pass a pointer to data itself if block is one.
         if (mode == 'sequential') & (block_number == 1):

@@ -18,6 +18,19 @@ import matplotlib.pyplot as plt
 # Use global time variable to measure time needed to compute stuff:        
 glob_time = 0
 
+def mult_dim(array, vector, dim):
+    """
+    Multiply a 3D array by a 1D vector along one of the dimensions.
+    """
+    if dim == 0:
+        array *= vector[:, None, None]
+        
+    elif dim == 1:
+        array *= vector[None, :, None]
+        
+    else:
+        array *= vector[None, None, :]
+
 def anyslice(array, index, dim):
     """
     Slice an array along an arbitrary dimension.
@@ -26,6 +39,52 @@ def anyslice(array, index, dim):
     sl[dim] = index
       
     return sl
+    
+def pad(array, dim, width, symmetric = False):
+    """
+    Pad an array along the given dimension.
+    """
+    padl = numpy.zeros(3, dtype = int)
+    padr = numpy.zeros(3, dtype = int)
+
+    if numpy.size(width) > 1:
+        padl[dim] = int(width[0])
+        padr[dim] = int(width[1])
+        
+    else:    
+        if symmetric:        
+            padl[dim] = int(width) // 2
+            padr[dim] = int(width) - padl[dim] 
+    
+        else:
+            padr[dim] = int(width)
+        
+    return numpy.pad(array, ((padl[0], padr[0]), (padl[1], padr[1]), (padl[2], padr[2])), mode = 'constant')  
+                
+    
+def crop(array, dim, width, symmetric = False):
+    """
+    Crop an array along the given dimension.
+    """
+    if numpy.size(width) > 1:
+        widthl = int(width[0])
+        widthr = int(width[1])
+        
+    else:
+        if symmetric:
+            widthl = int(width) // 2
+            widthr = int(width) - widthl 
+        else:
+            widthl = 0
+            widthr = int(width)
+                
+    if dim == 0:
+        return array[widthl:-widthr, :,:]
+    elif dim == 1:
+        return array[:,widthl:-widthr,:]
+    elif dim == 2:
+        return array[:,:,widthl:-widthr]    
+    
 
 def progress_bar(progress):
     """

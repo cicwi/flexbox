@@ -112,21 +112,21 @@ class Pipe:
 
         # This one maps function names to callback funtions:
         self._callback_dictionary_ = {'scan_flexray': self._scan_flexray_, 'read_flexray': self._read_flexray_, 
-        'read_all_meta': self._read_all_meta_, 'process_flex': self._process_flex_, 'crop': self._crop_,
+        'read_all_meta': self._read_all_meta_, 'process_flex': self._process_flex_, 'shape': self._shape_,
         'merge_detectors': self._merge_detectors_, 'merge_volume': self._merge_volume_, 'find_rotation': self._find_rotation_,
         'fdk': self._fdk_,'sirt': self._sirt_, 'write_flexray': self._write_flexray_, 'cast2int':self._cast2int_, 
         'display':self._display_, 'memmap':self._memmap_, 'read_volume': self._read_volume_, 'equalize_histogram': self._equalize_histogram_,
-        'equalize_resolution': self._equalize_resolution_, 'register_volumes': _register_volumes_}
+        'equalize_resolution': self._equalize_resolution_, 'register_volumes': self._register_volumes_}
         
         # This one maps function names to condition that have to be used with them:
-        self._condition_dictionary_ = {'scan_flexray': ['path'], 'read_flexray': ['sampling'], 'register_volumes'[], 
-        'read_all_meta':[],'process_flex': [], 'crop': ['crop'],'sirt': [], 'find_rotation':[], 'equalize_histogram':[]
+        self._condition_dictionary_ = {'scan_flexray': ['path'], 'read_flexray': ['sampling'], 'register_volumes':[], 
+        'read_all_meta':[],'process_flex': [], 'shape': ['shape'],'sirt': [], 'find_rotation':[], 'equalize_histogram':[],
         'merge_detectors': ['memmap'], 'merge_volume':['memmap'], 'fdk': [], 'write_flexray': ['folder'], 
         'cast2int':['bounds'], 'display':[], 'memmap':['path'], 'read_volume': [], 'equalize_resolution':[]}
         
         # This one maps function names to function types. There are three: batch, standby, coincident
         self._type_dictionary_ = {'scan_flexray': 'batch', 'read_flexray': 'batch', 'find_rotation':'batch',
-        'read_all_meta':'concurrent', 'process_flex': 'batch', 'crop': 'batch', 'sirt':'batch','equalize_resolution':'batch'
+        'read_all_meta':'concurrent', 'process_flex': 'batch', 'shape': 'batch', 'sirt':'batch','equalize_resolution':'batch',
         'merge_detectors': 'standby', 'merge_volume':'standby', 'fdk': 'batch', 'write_flexray': 'batch', 
         'cast2int':'batch', 'display':'batch', 'memmap':'batch', 'read_volume': 'batch','register_volumes':'batch', 
         'equalize_histogram':'batch'}
@@ -309,7 +309,10 @@ class Pipe:
                     
                     # Action counter increase:
                     action.count += 1
-                                        
+                                  
+                    #print('*** Block ***')
+                    #print(block.data)
+                    
                     # Apply action
                     action.callback(block, action.conditions, action.count)
                             
@@ -399,12 +402,6 @@ class Pipe:
                 
             else:
                 meta = flexData.read_log(path, 'flexray', bins = samp)
-                
-                # Some log files dont have theta information... they screw things up
-                if (len(meta['geometry']['thetas']) == 0):
-                    if data.geometry:
-                        meta['geometry']['thetas'] = data.meta['geometry']['thetas']
-
                 data.meta = meta
     
     def _read_volume_(self, data, condition, count):
@@ -454,18 +451,12 @@ class Pipe:
     
         data.meta = flexData.read_log(path, 'flexray', bins = samp)   
                 
-        data.meta['geometry']['thetas'] = data.meta['geometry']['thetas'][::samp]
-
         data.data = flexData.raw2astra(data.data)    
         data.dark = flexData.raw2astra(data.dark)    
         data.flat = flexData.raw2astra(data.flat)    
         
         data.type = 'projections'
-        
-        # Sometimes flex files don't report theta range...
-        if len(data.meta['geometry']['thetas']) == 0:
-            data.meta['geometry']['thetas'] = numpy.linspace(0, 360, data.data.shape[1])
-        
+                
     def _process_flex_(self, data, condition, count):
         """
         Process data.
@@ -475,9 +466,14 @@ class Pipe:
         
         data.data -= data.dark
         data.data /= (data.flat.mean(1)[:, None, :] - data.dark)
-            
+        
+        data.data[data.data <= 0] = 1e-3
+        
         numpy.log(data.data, out = data.data)
         data.data *= -1
+        
+        # SOmetimes there are non of inf pixels...
+        data.data[~numpy.isfinite(data.data)] = 0
             
     def _merge_detectors_(self, data, condition, count):
         """
@@ -650,21 +646,28 @@ class Pipe:
         # Replace projection data with volume data:
         data.data = vol
                 
-    def _crop_(self, data, condition, count):
+    def _shape_(self, data, condition, count):
         """
-        Crop
+        Shape the data to a given shape.
         """
         print('Applying crop...')
-        crop = condition.get('crop')
         
-        if crop[0] > 0:
-            data.data = data.data[crop[0]:-crop[0], :, :]
-
-        if crop[1] > 0:
-            data.data = data.data[:, crop[1]:-crop[1], :]
-
-        if crop[2] > 0:
-            data.data = data.data[:,:,crop[2]:-crop[2]]
+        shape = condition.get('shape')
+                
+        myshape = data.data.shape
+        if (myshape != shape):
+            
+            print('Changing shape from:', myshape, 'to', shape)
+            
+            for dim in range(3):
+                crop = shape[dim] - myshape[dim]
+                if crop < 0:
+                    # Crop case:
+                    data.data = flexUtil.crop(data.data, dim, -crop, symmetric = True)
+            
+                elif crop > 0:
+                    # Pad case:
+                    data.data = flexUtil.pad(data.data, dim, crop, symmetric = True)
         
     def _cast2int_(self, data, condition, count):
         """
@@ -679,11 +682,16 @@ class Pipe:
         Display some data
         """        
         dim = condition.get('dim')
+        proj = condition.get('projection')
+        
         if not dim: 
             dim = 1
             
             # DIsplay single dimension:
-            flexUtil.display_slice(data.data, dim = dim, title = 'Mid slice. Block #%u'%count)
+            if proj:
+                flexUtil.display_projection(data.data, dim = dim, title = 'Projection. Block #%u'%count)
+            else:
+                flexUtil.display_slice(data.data, dim = dim, title = 'Mid slice. Block #%u'%count)    
                 
     def _memmap_(self, data, condition, count):
         """
@@ -711,83 +719,158 @@ class Pipe:
         """
         Write the raw and meta files to disk.
         """
-        folder = condition.get('folder')
-                        
+        folder = condition.get('folder')                        
         dim = condition.get('dim')
+        name = condition.get('name')
+        skip = condition.get('skip')
+        
+        if name is None:
+            name = 'vol'
+        
         if dim is None:
             dim = 0
+            
+        if skip is None:
+            skip = 1
 
-        flexData.write_raw(os.path.join(data.path, '../', folder), 'vol', data.data, dim = dim)
-        flexData.write_meta(os.path.join(data.path, '../', folder, 'meta.toml'), data.meta)  
+        flexData.write_raw(os.path.join(data.path,  folder), name, data.data, dim = dim, skip = skip)
+        flexData.write_meta(os.path.join(data.path, folder, 'meta.toml'), data.meta)  
         
     def _register_volumes_(self, data, condition, count):
         """
         Register all volumes to the first one in the que.
         """
+        
         print('Volume registration in progress...')
+        
+        # Condition of registering to the last dataset:
+        last = condition.get('last')
         
         # Compute the histogram of the first dataset:
         if count == 1:
             self._buffer_['fixed'] = data.data
                          
         else:
-            flexCompute.registartion_moments(self._buffer_['fixed'], data.data)
+            # Register volumes
+            T, R = flexCompute.register_volumes(self._buffer_['fixed'], data.data, subsamp = 1, use_CG = True)
             
-            flexCompute.registration_optimizer(self._buffer_['fixed'], data.data)
+            # Resample the moving volume:
+            data.data = flexCompute.affine(data.data, R, T)
+            
+            # We will register to the last dataset if it is mentioned in conditions:
+            if last:
+                self._buffer_['fixed'] = data.data    
             
         # Last call:   
-        if self._data_que_.size == (count + 1):  
-            self._buffer_['fixed'] = None
+        if len(self._data_que_) == count:  
+            del self._buffer_['fixed']
         
     def _equalize_histogram_(self, data, condition, count):
         """
         Equalize the intensity levels based on histograms.
         """
         print('Equalizing intensities...')
-        
+                
         # Compute the histogram of the first dataset:
         if count == 1:
             
-            rng = flexCompute.principal_range(data.data)
+            rng = flexCompute.intensity_range(data.data)
             self._buffer_['range'] = rng
+
+            # This interefers with principal range. Use it only after!
+            data.data = flexCompute.remove_dark(data.data)
                          
-         else:
+        else:
              
-         # Rescale intensities:
-         rng_0 = self._buffer_['range']
-         rng = flexCompute.principal_range(data.data)    
+             # Rescale intensities:
+             rng_0 = self._buffer_['range']
+             rng = flexCompute.intensity_range(data.data)    
+                 
+             print('Rescaling from [%f0.2, %f0.2] to [%f0.2, %f0.2]' % (rng[0], rng[2], rng_0[0], rng_0[2]))
              
-         data.data -= (rng[0] - rng_0[0])
-         data.data *= (rng_0[1] - rng_0[0]) / (rng[1] - rng[0]) 
-        
-         # Last call:   
-         if self._data_que_.size == (count + 1):
-            self._buffer_['range'] = None 
+             data.data -= (rng[0] - rng_0[0])             
+             data.data *= (rng_0[2] - rng_0[0]) / (rng[2] - rng[0]) 
+             
+             data.data[data.data < rng_0[0]] = rng_0[0]
+             
+             # This interefers with principal range. Use it only after!
+             data.data = flexCompute.remove_dark(data.data)
+            
+        # Last call:   
+        if len(self._data_que_) == count:
+            del self._buffer_['range']
          
     def _equalize_resolution_(self, data, condition, count):
         """
         Scale all datasets to the same pixle size. 
         """
         
-        print('Equalizing pixel sizes...')        
+        print('Equalizing pixel sizes...')
         
-        # Find the biggest pixel size:
-        pixels = []
-        
-        for data_ in self._data_que_:
-            pixles.append(data_.meta['geometry']['img_pixel'])
+        # First call computes the maximum pixels and size of the volume: 
+        if count == 1:
             
-        pix_max = max(pixels)    
+            # Find the biggest pixel size and volume size (can be different):
+            n =len(self._data_que_)
+        
+            pixels = numpy.zeros(n)
+            
+            for ii in range(n):
+                data_ = self._data_que_[ii]
+                pixels[ii] = data_.meta['geometry']['img_pixel']     
+         
+            # Maximum pixel and maximum shape:
+            pix_max = pixels.max()
+            
+            # For now we don't have data.data loaded for all blocks yet. SO we don't know the shape of the data.
+            # Will assume that the dataset with the biggest img_pixel has the same shape as the first dataset...
+            shp_max = numpy.array(data.data.shape)
+            
+            self._buffer_['pix_max'] = pix_max
+            self._buffer_['shp_max'] = shp_max
+            
+            #sizes[ii] = data_.meta['geometry']['img_pixel'] * numpy.array(data_.data.shape)
+            #shp_max = numpy.int32(sizes.max(0) / pix_max)
+        else:
+            pix_max = self._buffer_['pix_max']
+            shp_max = self._buffer_['shp_max']
             
         # Downsample to that pixel size:
         fact = data.meta['geometry']['img_pixel'] / pix_max
         
         if fact != 1:
-                
-            data.data = ndimage.interpolation.zoom(data.data, fact)
+            
+            print('From %uum to %uum' % (data.meta['geometry']['img_pixel']*1e3, pix_max*1e3))    
+            
+            data.data = flexCompute.scale(data.data, fact)
             data.meta['geometry']['img_pixel'] /= fact
             data.meta['geometry']['det_pixel'] /= fact
-        
+
+        # Equalize shape:
+        myshape = data.data.shape
+        if any(myshape != shp_max):
+            
+            print('Changing shape from:', myshape, 'to', shp_max)
+            
+            for dim in range(3):
+                crop = shp_max[dim] - myshape[dim]
+                if crop < 0:
+                    # Crop case:
+                    data.data = flexUtil.crop(data.data, dim, -crop, symmetric = True)
+            
+                elif crop > 0:
+                    # Pad case:
+                    data.data = flexUtil.pad(data.data, dim, crop, symmetric = True)
+             
+        # Report:
+        mass = numpy.sum(data.data > 0) / numpy.prod(data.data.shape)    
+        print('Nonzero pixels: %0.3f of the volume.' % mass)
+            
+        # Last call:   
+        if len(self._data_que_) == count:  
+            del self._buffer_['pix_max']
+            del self._buffer_['shp_max']
+
 '''
 def write_log(filename, log):
     """
