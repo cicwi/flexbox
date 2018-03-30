@@ -15,58 +15,62 @@ from . import flexUtil
 from . import flexData
 from . import flexProject
 
-def remove_dark(data):
+def binary_threshold(data, mode = 'histogram'):
     '''
-    Thresholds the data below the first minimum in the histogram
+    Thresholds the data below the first minimum in the histogram or using the Otsu approach
     '''
     
     import matplotlib.pyplot as plt
+    import skimage.filters
     
-    print('Removing low intensities...')
+    print('Applying binary threshold...')
     
-    # Obtain the first minima on the histogram - assuming this is the border between air and material
-    #print('min', data.min())
-    #print('max', data.max())
     
-    x, y = histogram(data[::2,::2,::2], log = True, plot = False)
+    if mode == 'otsu':
+        threshold = skimage.filters.threshold_otsu(data[::2,::2,::2])    
+        
+    elif mode == 'histogram':
+        x, y = histogram(data[::2,::2,::2], log = True, plot = False)
+        
+        # Make sure there are no 0s:
+        y = numpy.log(y + 1)    
+        y = ndimage.filters.gaussian_filter1d(y, sigma=1)
     
-    # Make sure there are no 0s:
-    y = numpy.log(y + 1)    
-    y = ndimage.filters.gaussian_filter1d(y, sigma=1)
-
-    # Find air maximum:
-    air_index = numpy.argmax(y)
+        # Find air maximum:
+        air_index = numpy.argmax(y)
+        
+        print('Air found at %0.3f' % x[air_index])
     
-    print('Air found at %0.3f' % x[air_index])
-
-    # Find the first shoulder after air peak in the histogram spectrum:
-    x = x[air_index:]
+        # Find the first shoulder after air peak in the histogram spectrum:
+        x = x[air_index:]
+        
+        yd = abs(numpy.diff(y))
+        yd = yd[air_index:]
+        y = y[air_index:]
+        
+        # Minimum derivative = Saddle point or extremum:
+        ind = signal.argrelextrema(yd, numpy.less)[0][0]
+        min_ind = signal.argrelextrema(y, numpy.less)[0][0]
     
-    yd = abs(numpy.diff(y))
-    yd = yd[air_index:]
-    y = y[air_index:]
+        plt.figure()
+        plt.plot(x, y)
+        plt.plot(x[ind], y[ind], '+')
+        plt.plot(x[min_ind], y[min_ind], '*')
+        plt.show()
+        
+        # Is it a Saddle point or extremum?
+        if abs(ind - min_ind) < 2:    
+            threshold = x[ind]         
     
-    # Minimum derivative = Saddle point or extremum:
-    ind = signal.argrelextrema(yd, numpy.less)[0][0]
-    min_ind = signal.argrelextrema(y, numpy.less)[0][0]
-
-    plt.figure()
-    plt.plot(x, y)
-    plt.plot(x[ind], y[ind], '+')
-    plt.plot(x[min_ind], y[min_ind], '*')
-    plt.show()
+            print('Minimum found next to the air peak at: %0.3f' % x[ind])        
+        else:            
+            # Move closer to the air peak since we are looking at some other material             
+            threshold = x[ind] - abs(x[ind] - x[0]) / 4 
     
-    # Is it a Saddle point or extremum?
-    if abs(ind - min_ind) < 2:    
-        threshold = x[ind]         
-
-        print('Minimum found next to the air peak at: %0.3f' % x[ind])        
-    else:            
-        # Move closer to the air peak since we are looking at some other material             
-        threshold = x[ind] - abs(x[ind] - x[0]) / 4 
-
-        print('Saddle point found next to the air peak at: %0.3f' % x[ind])        
-                                                                                
+            print('Saddle point found next to the air peak at: %0.3f' % x[ind])        
+            
+    else: raise ValueError('Wrong mode parameter. Can be histogram or otsu.')
+            
     # Zero the intensity below extrema:
     data[data < threshold] = 0
 
@@ -74,7 +78,7 @@ def remove_dark(data):
 
     return data
     
-def _find_best_flip_(fixed, moving, centre, area = 64):
+def _find_best_flip_(fixed, moving, Rfix, Tfix, Rmov, Tmov, use_CG = True, sample = 2):
     """
     Find the orientation of the moving volume with the mallest L2 distance from the fixed volume, 
     given that there is 180 degrees amiguity for each of three axes.
@@ -89,42 +93,44 @@ def _find_best_flip_(fixed, moving, centre, area = 64):
         (array): rotation matrix corresponding to the best flip
     
     """
+    fixed = fixed[::sample, ::sample, ::sample].copy()
+    moving = moving[::sample, ::sample, ::sample].copy()
     
-    x = int(numpy.round(centre[0]))
-    y = int(numpy.round(centre[1]))
-    z = int(numpy.round(centre[2]))
+    # Apply filters to smooth erors somewhat:
+    fixed = ndimage.filters.gaussian_filter(fixed, sigma = 1)
+    moving = ndimage.filters.gaussian_filter(moving, sigma = 1)
     
-    # Make sure we are looking at the centers of mass:
-    fixed = fixed[x-50:x+50, y-50:y+50, z-50:z+50]
-    moving_ = moving[x-50:x+50, y-50:y+50, z-50:z+50]
+    #flexUtil.display_projection(fixed - moving, title = 'before flips')
+     
+    # Generate flips:
+    Rs = _generate_flips_(Rfix)
     
-    # Compute L2 norms of different flips:
-    L2 = numpy.zeros(4)
-    L2[0] = numpy.sum((fixed - moving_)**2)   
-    L2[1] = numpy.sum((fixed - numpy.rot90(moving_, 2, axes = (1, 2)))**2)    
-    L2[2] = numpy.sum((fixed - numpy.rot90(moving_, 2, axes = (0, 2)))**2)   
-    L2[3] = numpy.sum((fixed - numpy.rot90(moving_, 2, axes = (0, 1)))**2)
-        
-    if numpy.argmin(L2) == 0:       
-        R = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
-        
-    elif numpy.argmin(L2) == 1:
-        
-        moving = numpy.rot90(moving, 2, axes = (1, 2))
-        R = transforms3d.euler.euler2mat(numpy.pi,0,0)
-        
-    elif numpy.argmin(L2) == 2:
-        
-        moving = numpy.rot90(moving, 2, axes = (0, 2))
-        R = transforms3d.euler.euler2mat(0, numpy.pi,0)
+    # Compute L2 norms:
+    Lmax = numpy.inf
     
-    elif numpy.argmin(L2) == 3:
+    # Appliy flips:
+    for ii in range(len(Rs)):
         
-        moving = numpy.rot90(moving, 2, axes = (0, 1))
-        R = transforms3d.euler.euler2mat(0, 0, numpy.pi)
+        Rtot_ = Rmov.T.dot(Rfix).dot(Rs[ii])
+        Ttot_ = (Tfix - numpy.dot(Tmov, Rtot_)) / sample
+        
+        if use_CG:
+            
+            #flexUtil.display_projection(fixed - affine(moving, Rtot_, Ttot_), title = 'before itk')
+            Ttot_, Rtot_, L = _itk_registration_(fixed, moving, Rtot_, Ttot_, shrink = [2,], smooth = [4,]) 
+        
+        L = norm(fixed - affine(moving, Rtot_, Ttot_))
+        
+        if Lmax > L:
+            Rtot = Rtot_.copy()
+            Ttot = Ttot_.copy()
+            Lmax = L
+            
+            print('We found better flip(%u), L ='%ii, L)
+            flexUtil.display_projection(fixed - affine(moving, Rtot_, Ttot_), title = 'Diff (%u). L2 = %f' %(ii, L))
     
-    return R    
-
+    return Rtot, Ttot * sample 
+    
 def moments_orientation(data, subsample = 1):
     '''
     Find the center of mass and the intensity axes of the image.
@@ -138,37 +144,119 @@ def moments_orientation(data, subsample = 1):
     
     '''
     # find centroid:
-    m000 = moment3(data, [0, 0, 0], subsample = subsample)
-    m100 = moment3(data, [1, 0, 0], subsample = subsample)
-    m010 = moment3(data, [0, 1, 0], subsample = subsample)
-    m001 = moment3(data, [0, 0, 1], subsample = subsample)
+    m000 = moment3(data, [0, 0, 0])
+    m100 = moment3(data, [1, 0, 0])
+    m010 = moment3(data, [0, 1, 0])
+    m001 = moment3(data, [0, 0, 1])
 
     # Somehow this system of coordinates and the system of ndimage.interpolate require negation of j:
     T = [m100 / m000, m010 / m000, m001 / m000]
     
     # find central moments:
-    mu200 = moment3(data, [2, 0, 0], T, subsample = subsample)
-    mu020 = moment3(data, [0, 2, 0], T, subsample = subsample)
-    mu002 = moment3(data, [0, 0, 2], T, subsample = subsample)
-    mu110 = moment3(data, [1, 1, 0], T, subsample = subsample)
-    mu101 = moment3(data, [1, 0, 1], T, subsample = subsample)
-    mu011 = moment3(data, [0, 1, 1], T, subsample = subsample)
+    mu200 = moment3(data, [2, 0, 0], T)
+    mu020 = moment3(data, [0, 2, 0], T)
+    mu002 = moment3(data, [0, 0, 2], T)
+    mu110 = moment3(data, [1, 1, 0], T)
+    mu101 = moment3(data, [1, 0, 1], T)
+    mu011 = moment3(data, [0, 1, 1], T)
     
     # construct covariance matrix and compute rotation matrix:
     M = numpy.array([[mu200, mu110, mu101], [mu110, mu020, mu011], [mu101, mu011, mu002]])
 
-    # Here we dont sort by the intensity axes length... there will be 180 degrees ambiguity    
-    vec = numpy.linalg.eig(M)[1]
-
-    #lam = numpy.linalg.eig(M)[0]    
-    #R = vec[inds[::-1]]
-    R = numpy.array(vec)
+    #Compute eigen vecors of the covariance matrix and sort by eigen values:
+    vec = numpy.linalg.eig(M)[1].T
+    lam = numpy.linalg.eig(M)[0]    
     
+    # Here we sort the eigen values:
+    ind = numpy.argsort(lam)
+    
+    # Matrix R is composed of basis vectors:
+    R = numpy.array(vec[ind[::-1]])
+    
+    # Makes sure our basis always winds the same way:
+    R[2, :] = numpy.cross(R[0, :], R[1, :])     
+    
+    # Centroid:
     T = numpy.array(T) - numpy.array(data.shape) // 2
     
     return T, R
+        
+def _itk2mat_(transform, shape):
+    """
+    Transform ITK to matrix and a translation vector.
+    """
+    
+    # transform contains information about the centre of rptation, rotation and translation
+    # We need to convert this to a rotation matrix and single translation vector
+    # here we go,,,
+    
+    T = -numpy.array(transform.GetParameters()[3:][::-1])
+    euler = -numpy.array(transform.GetParameters()[:3])
+    R = transforms3d.euler.euler2mat(euler[0], euler[1], euler[2], axes='szyx')
+    
+    # Centre of rotation:
+    centre = (transform.GetFixedParameters()[:3][::-1] - T)
+    T0 = centre - numpy.array(shape) // 2
+    
+    # Add rotated vector pointing to the centre of rotation to total T
+    T = T - numpy.dot(T0, R) + T0
+    
+    return T, R
+    
+def _mat2itk_(R, T, shape):
+    """
+    Initialize ITK transform from a rotation matrix and a translation vector
+    """   
+    import SimpleITK as sitk
+    
+    centre = numpy.array(shape, dtype = float) // 2
+    euler = transforms3d.euler.mat2euler(R, axes = 'szyx')    
+
+    transform = sitk.Euler3DTransform()
+    transform.SetComputeZYX(True)
+    
+    transform.SetTranslation(-T[::-1])
+    transform.SetCenter((centre + T)[::-1])    
+
+    transform.SetRotation(-euler[0], -euler[1], -euler[2])    
+    
+    return transform    
    
-def _itk_registration_(fixed, moving):
+def _moments_registration_(fixed, moving):
+    """
+    Register two volumes useing image moments.
+    
+        Args:
+        fixed (array): fixed 3D array
+        moving (array): moving 3D array
+        
+    Returns:
+        moving will be altered in place.
+        
+        Ttot: translation vector
+        Rtot: rotation matrix
+        Tfix: position of the fixed volume
+
+    """
+    # Positions of the volumes:
+    Tfix, Rfix  = moments_orientation(fixed)
+    Tmov, Rmov  = moments_orientation(moving)
+    
+    flexUtil.progress_bar(0.1)
+    
+    # Total rotation and shift:
+    Rtot = numpy.dot(Rmov, Rfix.T)
+    Ttot = Tfix - numpy.dot(Tmov, Rtot)
+
+    # Apply transformation:
+    moving_ = affine(moving.copy(), Rtot, Ttot)
+    
+    # Solve ambiguity with directions of intensity axes:    
+    Rtot, Ttot = _find_best_flip_(fixed, moving_, Rfix, Tfix, Rmov, Tmov, use_CG = False)
+    
+    return Ttot, Rtot, Tfix
+    
+def _itk_registration_(fixed, moving, R_init = None, T_init = None, shrink = [4, 1], smooth = [4, 0]):
     """
     Carry out ITK based volume registration (based on Congugate Gradient).
     
@@ -179,16 +267,27 @@ def _itk_registration_(fixed, moving):
     Returns:
         moving will be altered in place.
         
-        Tfix: translation to the center of the fixed volume
-        Tmov: translation to the center of the moving volume
-        Ritk: rotation of the moving volume
+        T: translation vector
+        R: rotation matrix
         
     """
-    
     import SimpleITK as sitk
-        
-    print('Running ITK volume registration.')
+       
+    #z = affine(moving, R_init, T_init)
+    #flexUtil.display_projection(fixed, dim= 1, title = 'fixed') 
+    #flexUtil.display_projection(z, dim= 1, title = 'before') 
+            
     flexUtil.progress_bar(0) 
+    
+    # Initial transform:
+    if R_init is None:
+        R_init = numpy.zeros([3,3])
+        R_init[0, 0] = 1
+        R_init[1, 1] = 1
+        R_init[2, 2] = 1
+        
+    if T_init is None:
+        T_init = numpy.zeros(3)    
     
     # Initialize itk images:
     fixed_image =  sitk.GetImageFromArray(fixed)
@@ -198,27 +297,25 @@ def _itk_registration_(fixed, moving):
     registration_method = sitk.ImageRegistrationMethod()
 
     # Similarity metric settings.
-    registration_method.SetMetricAsMattesMutualInformation(numberOfHistogramBins=50)
-    registration_method.SetMetricSamplingStrategy(registration_method.REGULAR)
+    #registration_method.SetMetricAsMattesMutualInformation(numberOfHistogramBins=50)
+    registration_method.SetMetricSamplingStrategy(registration_method.RANDOM)
     registration_method.SetMetricSamplingPercentage(0.01)
 
     registration_method.SetInterpolator(sitk.sitkLinear)
 
     # Initial centering transform:
-    transform = sitk.CenteredTransformInitializer(fixed_image, 
-                                                      moving_image, 
-                                                      sitk.Euler3DTransform(), 
-                                                      sitk.CenteredTransformInitializerFilter.GEOMETRY)
+    transform = _mat2itk_(R_init, T_init, fixed.shape)   
+    
     # Optimizer settings.
-    #registration_method.SetOptimizerAsGradientDescent(learningRate=0.5, numberOfIterations=200, convergenceMinimumValue=1e-10, convergenceWindowSize=10)
     registration_method.SetOptimizerAsPowell()
+    #registration_method.SetOptimizerAsGradientDescent(learningRate=0.5, numberOfIterations=200, convergenceMinimumValue=1e-10, convergenceWindowSize=10)
     #registration_method.SetOptimizerAsGradientDescentLineSearch(learningRate=1, numberOfIterations = 100)
     #registration_method.SetOptimizerAsConjugateGradientLineSearch(learningRate=1, numberOfIterations = 100)
-    registration_method.SetOptimizerScalesFromPhysicalShift()
+    #registration_method.SetOptimizerScalesFromPhysicalShift()
 
     # Setup for the multi-resolution framework.            
-    registration_method.SetShrinkFactorsPerLevel(shrinkFactors = [8,1])
-    registration_method.SetSmoothingSigmasPerLevel(smoothingSigmas=[8,1])
+    registration_method.SetShrinkFactorsPerLevel(shrinkFactors = shrink)
+    registration_method.SetSmoothingSigmasPerLevel(smoothingSigmas = smooth)
     registration_method.SmoothingSigmasAreSpecifiedInPhysicalUnitsOn()
 
     # Don't optimize in-place, we would possibly like to run this cell multiple times.
@@ -227,27 +324,20 @@ def _itk_registration_(fixed, moving):
     transform = registration_method.Execute(sitk.Cast(fixed_image, sitk.sitkFloat32), 
                                                   sitk.Cast(moving_image, sitk.sitkFloat32))
     
-    # This is a bit of woodo to get to the same definition of Euler angles and translation that I use:
-    #Titk = -numpy.array(transform.GetParameters()[:2:-1])
-    Tmov = numpy.array(transform.GetFixedParameters()[2::-1]) - numpy.array(fixed.shape) // 2
-    #Tmov -= numpy.ones(3)
-    Tfix = numpy.array(transform.GetParameters()[:2:-1]) + Tmov
-
-    euler = transform.GetParameters()[2::-1]
-    Ritk = transforms3d.euler.euler2mat(-euler[0], -euler[1], euler[2])
-    
     flexUtil.progress_bar(1) 
     
-    print(registration_method.GetOptimizerStopConditionDescription()) 
-    
-    moving_image = sitk.Resample(moving_image, fixed_image, transform, sitk.sitkLinear, 0.0, moving_image.GetPixelID())
-    moving = sitk.GetArrayFromImage(moving_image)    
-    
-    print('L2 (ITK native transform)', numpy.sqrt(numpy.mean((moving - fixed) ** 2)))
-    
-    flexUtil.display_slice(fixed - moving, dim = 1, title = 'after ITK')
+    #print("Final metric value: ", registration_method.GetMetricValue())
+    print("Optimizer`s stopping condition: ", registration_method.GetOptimizerStopConditionDescription())
 
-    return Tmov, Tfix, Ritk
+    # This is a bit of woodo to get to the same definition of Euler angles and translation that I use:
+    T, R = _itk2mat_(transform, moving.shape)
+            
+    #moving_image = sitk.Resample(moving_image, fixed_image, transform, sitk.sitkLinear, 0.0, moving_image.GetPixelID())
+    #moving = sitk.GetArrayFromImage(moving_image)    
+        
+    #flexUtil.display_projection(fixed - moving, dim = 1, title = 'native diff')  
+    
+    return T, R, registration_method.GetMetricValue()
     
 def affine(data, matrix, shift):
     """
@@ -260,7 +350,23 @@ def affine(data, matrix, shift):
 
     return ndimage.interpolation.affine_transform(data, matrix, offset = T0-T1, order = 1)
     
-def register_volumes(fixed, moving, subsamp = 2, use_CG = True, monochrome = False):
+def _generate_flips_(Rfix):
+    """
+    Generate number of rotation and translation vectors.
+    """    
+    # Rotate the moving object around it's main axes:
+    R = [numpy.eye(3),]
+    
+    # Axes:
+    for ii in range(3):    
+        #R.append(transforms3d.euler.axangle2mat(Rfix[ii], numpy.pi))
+        # Angles:
+        for jj in range(3):
+            R.append(transforms3d.euler.axangle2mat(Rfix[ii], (jj+1) * numpy.pi/2))
+    
+    return R
+                    
+def register_volumes(fixed, moving, subsamp = 2, use_moments = True, use_CG = True, use_flips = False, threshold = 'otsu'):
     '''
     Registration of two 3D volumes.
     
@@ -269,83 +375,94 @@ def register_volumes(fixed, moving, subsamp = 2, use_CG = True, monochrome = Fal
         moving (array): moving/slave volume
         subsamp (int): subsampling of the moments computation
         use_itk (bool): if True, use congugate descent method after aligning the moments
-        monochrome (bool): if True, compares 0/1 images. If false, compares true intensities.
+        treshold (str): can be None, 'otsu' or 'histogram' - defines the strategy for removing low intensity noise
         
     Returns:
         
-    '''
-    
+    '''    
     if fixed.shape != moving.shape: raise IndexError('Fixed and moving volumes have different dimensions:', fixed.shape, moving.shape)
     
     print('Using image moments to register volumes.')
         
     # Subsample volumes:
-    fixed_ = fixed[::subsamp,::subsamp,::subsamp].copy()
-    moving_ = moving[::subsamp,::subsamp,::subsamp].copy()
+    fixed_0 = fixed[::subsamp,::subsamp,::subsamp].copy()
+    moving_0 = moving[::subsamp,::subsamp,::subsamp].copy()
     
-    if monochrome:
-        fixed_ = fixed_ > 0
-        moving_ = moving_ > 0
+    # Histogram normalization:
+    #fact_fix = numpy.mean(fixed_0[fixed_0 > 0.005])
+    #fact_mov = numpy.mean(moving_0[moving_0 > 0.005])
+    
+    # Normalize:
+    #fixed_0 /= fact_fix
+    #moving_0 /= fact_mov
+    
+    if threshold:
+        fixed_0 = binary_threshold(fixed_0, threshold)
+        moving_0 = binary_threshold(moving_0, threshold)
         
-        # Clean up noise close to zero intensity:
-        fixed_ = ndimage.morphology.binary_erosion(fixed_).astype(numpy.float32)
-        moving_ = ndimage.morphology.binary_erosion(moving_).astype(numpy.float32)
-
-    L2 = numpy.sqrt(numpy.mean(((fixed_ - moving_))**2))
+    L2 = norm(fixed_0 - moving_0)
     print('L2 norm before registration: %0.2e' % L2)
     
-    flexUtil.progress_bar(0)  
+    if use_moments:
+        
+        print('Running moments registration.')
+        flexUtil.progress_bar(0)
     
-    # Positions of the volumes:
-    Tfix, Rfix  = moments_orientation(fixed_)
-    Tmov, Rmov  = moments_orientation(moving_)
-    
-    flexUtil.progress_bar(0.1)
-    
-    # Total rotation and shift:
-    Rtot = numpy.dot(Rmov, Rfix.T)
-    Ttot = (Tfix) - numpy.dot(Tmov, Rtot)
+        # Positions of the volumes:
+        Tfix, Rfix  = moments_orientation(fixed_0)
+        Tmov, Rmov  = moments_orientation(moving_0)
+               
+        # Total rotation and shift:
+        #Rtot = numpy.dot(Rmov, Rfix.T)
+        Rtot = Rmov.T.dot(Rfix)
 
-    # Apply transformation:
-    moving_ = affine(moving_, Rtot, Ttot)
+        Ttot = Tfix - numpy.dot(Tmov, Rtot)
+        
+        flexUtil.progress_bar(1)
     
-    # SOlve ambiguity with directions of intensity axes:    
-    Rflip = _find_best_flip_(fixed_, moving_, Tfix)
-    
-    # Update total transform:
-    Rtot = numpy.dot(Rtot, Rflip)
-    Ttot = (Tfix) - numpy.dot(Tmov, Rtot)
-    
-    flexUtil.progress_bar(1)
-    
-    L2 = numpy.sqrt(numpy.mean(((fixed_ - moving_))**2))
-    print('L2 norm after moments alignment: %0.2e' % L2)
-    
-    #print('Found shifts:', Ttot * subsamp)
-    #print('Found Euler rotations:', transforms3d.euler.mat2euler(Rtot))  
-    
+    else:
+        # Initial transform:
+        if Rtot is None:
+            Rtot = numpy.zeros([3,3])
+            Rtot[0, 0] = 1
+            Rtot[1, 1] = 1
+            Rtot[2, 2] = 1
+            
+            Ttot = numpy.zeros(3)
+            
     # Refine registration using ITK optimization:
-    if use_CG:
-        # Run ITK optimizer at full resolution:    
-        #Titk, Ritk = _itk_registration_(fixed_, moving_)
-        Tmov_, Tfix_, Ritk = _itk_registration_(fixed_, moving_)
+    if not use_CG:
         
-        # Update total transform:
-        Rtot = numpy.dot(Rtot, Ritk)
-        Ttot = (Tfix) - numpy.dot((Tmov), Rtot)    
+        # Solve ambiguity with directions of intensity axes:    
+        Rtot, Ttot = _find_best_flip_(fixed_0, moving_0, Rfix, Tfix, Rmov, Tmov, use_CG = use_flips)
+    
+    else:
         
-        # Apply transformation:
-        moving_ = affine(moving[::subsamp,::subsamp,::subsamp].copy(), Rtot, Ttot)
+        print('Running ITK optimization.')
         
-        L2 = numpy.sqrt(numpy.mean(((fixed_ - moving_))**2))
-        print('L2 norm after ITK registration: %0.2e' % L2)
+        Rtot = Rmov.T.dot(Rfix)
+        #Rtot = Rmov.dot(Rfix.T)
+        Ttot = Tfix - Tmov.dot(Rtot)
+
+        # Find flip with or without CG:
+        Rtot, Ttot = _find_best_flip_(fixed_0, moving_0, Rfix, Tfix, Rmov, Tmov, use_CG = use_flips)
         
-        
+        # Show the result of moments registration:
+        L2 = norm(fixed_0 - affine(moving_0.copy(), Rtot, Ttot))
+        print('L2 norm after moments registration: %0.2e' % L2)
+            
+        # Run CG with the best result:
+        Ttot, Rtot, L = _itk_registration_(fixed_0, moving_0, Rtot, Ttot, shrink = [8, 2, 1], smooth = [8, 2, 0])               
+            
+    # Apply transformation:
+    L2 = norm(fixed_0 - affine(moving_0.copy(), Rtot, Ttot))
+    print('L2 norm after registration: %0.2e' % L2)
+            
     print('Found shifts:', Ttot * subsamp)
     print('Found Euler rotations:', transforms3d.euler.mat2euler(Rtot))        
     
-    return Ttot * subsamp, Rtot 
-    
+    return Rtot, Ttot * subsamp 
+
 def scale(data, factor):
     '''
     Scales the volume via interpolation.
@@ -396,7 +513,7 @@ def translate(data, shift, axis = 0):
         
         sl = flexUtil.anyslice(data, ii, axis)
         
-        data[sl] = ndimage.interpolation.shift(data[sl], shift, order = 1, reshape=False)
+        data[sl] = ndimage.interpolation.shift(data[sl], shift, order = 1)
         
         flexUtil.progress_bar((ii+1) / sz)   
 
@@ -411,7 +528,8 @@ def histogram(data, nbin = 256, rng = [], plot = True, log = False):
     
     if rng == []:
         mi = min(data.min(), 0)
-        ma = data.max()
+        
+        ma = numpy.percentile(data, 99.99)
     else:
         mi = rng[0]
         ma = rng[1]
@@ -556,7 +674,7 @@ def residual_rings(data, kernel=[3, 1, 3]):
     '''
     Apply correction by computing outlayers .
     '''
-    import ndimage
+    #import ndimage
     
     # Compute mean image of intensity variations that are < 5x5 pixels
     print('Our best agents are working on the case of the Residual Rings. This can take years if the kernel size is too big!')
@@ -654,6 +772,12 @@ def _parabolic_min_(values, index, space):
         x0 = space[index]
 
     return x0    
+    
+def norm(array, type = 'L2'):
+    """
+    Compute L2 norm of the array.
+    """
+    return numpy.sqrt(numpy.mean((array)**2))    
     
 def _modifier_l2cost_(projections, geometry, subsample, value, key = 'axs_hrz', display = False):
     '''
@@ -757,8 +881,8 @@ def process_flex(path, options = {'bin':1, 'memmap': None}):
         
     '''
     
-    bins = options['bin']
-    memmap = options['memmap']
+    bins = options.get('bin')
+    memmap = options.get('memmap')
     
     # Read:    
     print('Reading...')

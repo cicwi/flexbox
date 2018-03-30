@@ -194,7 +194,7 @@ def sample_FDK(projections, geometry, sample):
     
     # Initialize ASTRA geometries:
     vol_geom = flexData.astra_vol_geom(geometry, volume.shape, sample = sample)
-    proj_geom = flexData.astra_proj_geom(geometry, projections_.shape[::2], sample = sample)    
+    proj_geom = flexData.astra_proj_geom(geometry, projections_.shape, sample = sample)    
     
     _backproject_block_(projections_, volume, proj_geom, vol_geom, 'FDK_CUDA')
     
@@ -321,7 +321,7 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
             l2 = (numpy.sqrt((block ** 2).mean()))
             
         else:
-            l2 = [] 
+            l2 = 0 
           
         # Project
         _backproject_block_(block, volume, proj_geom, vol_geom, 'BP3D_CUDA', operation)    
@@ -411,8 +411,8 @@ def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight':
     #    projections = numpy.ascontiguousarray(projections)        
     
     # We will use quick and dirty scaling coefficient instead of proper calculation of weights
-    m = (geometry['src2obj'] + geometry['det2obj']) / geometry['src2obj']
-    prj_weight = 1 / (projections.shape[1] * (geometry['det_pixel'] / m) ** 4 * max(volume.shape))
+    #m = (geometry['src2obj'] + geometry['det2obj']) / geometry['src2obj']
+    prj_weight = 1 / (projections.shape[1] * (geometry['img_pixel']) ** 4 * max(volume.shape))
                     
     # Initialize L2:
     l2 = []
@@ -462,8 +462,8 @@ def SIRT_tiled(projections, volume, geometries, iterations, options = {'poisson_
             
             geom = geometries[ii]
 
-            m = (geom['src2obj'] + geom['det2obj']) / geom['src2obj']
-            prj_weight = 1 / (proj.shape[1] * (geom['det_pixel'] / m) ** 4 * max(volume.shape))
+            #m = (geom['src2obj'] + geom['det2obj']) / geom['src2obj']
+            prj_weight = 1 / (proj.shape[1] * (geom['img_pixel']) ** 4 * max(volume.shape))
     
             # Update volume:
             l2_ += _L2_step_(proj, prj_weight, volume, geom, options)

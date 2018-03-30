@@ -70,6 +70,8 @@ def read_raw(path, name, skip = 1, sample = [1, 1], x_roi = [], y_roi = [], dtyp
     # Retrieve files, sorted by name
     files = _get_files_sorted_(path, name)
     
+    if len(files) == 0: raise IOError('Files not found:', os.path.join(path, name))
+    
     # Read the first file:
     image = _read_tiff_(files[0], sample, x_roi, y_roi)
     sz = numpy.shape(image)
@@ -203,7 +205,7 @@ def read_log(path, name, log_type = 'flexray', bins = 1):
         bins: forced binning in [y, x] direction
         
     Returns:    
-        geometry : src2obj, det2obj, det_pixel, thetas, det_hrz, det_vrt, det_mag, det_rot, src_hrz, src_vrt, src_mag, axs_hrz, vol_hrz, vol_vrt, vol_mag, vol_rot
+        geometry : src2obj, det2obj, det_pixel, thetas, det_hrz, det_vrt, det_mag, det_rot, src_hrz, src_vrt, src_mag, axs_hrz, vol_hrz, vol_tra 
         settings : physical settings - voltage, current, exposure
         description : lyrical description of the data
     """
@@ -326,9 +328,11 @@ def astra_vol_geom(geometry, vol_shape, slice_first = None, slice_last = None, s
     # Shape and size (mm) of the volume
     vol_shape = numpy.array(vol_shape)
     
-    mag = (geometry['det2obj'] + geometry['src2obj']) / geometry['src2obj']
-
-    voxel = numpy.array([sample[0], sample[1], sample[1]]) * geometry['det_pixel'] / mag
+    #voxel = numpy.array([sample[0], sample[1], sample[1]]) * geometry['det_pixel'] / mag
+    #mag = (geometry['det2obj'] + geometry['src2obj']) / geometry['src2obj']
+    
+    # Use 'img_pixel' to override the voxel size:
+    voxel = numpy.array([sample[0], sample[1], sample[1]]) * geometry['img_pixel']
 
     size = vol_shape * voxel
 
@@ -429,21 +433,30 @@ def astra_proj_geom(geometry, data_shape, index = None, sample = [1, 1]):
     
         # Global transformation:
         # Rotation matrix based on Euler angles:
-        R = transforms3d.euler.euler2mat(geometry['vol_rot'][0], geometry['vol_rot'][1], geometry['vol_rot'][2], 'szxy')
+        R = transforms3d.euler.euler2mat(geometry['vol_rot'][0], geometry['vol_rot'][1], geometry['vol_rot'][2], 'rzyx')
 
         # Apply transformation:
-        det_axis_hrz[:] = numpy.dot(R, det_axis_hrz)
-        det_axis_vrt[:] = numpy.dot(R, det_axis_vrt)
-        src_vect[:] = numpy.dot(R, src_vect)
-        det_vect[:] = numpy.dot(R, det_vect)            
+        det_axis_hrz[:] = numpy.dot(det_axis_hrz, R)
+        det_axis_vrt[:] = numpy.dot(det_axis_vrt, R)
+        src_vect[:] = numpy.dot(src_vect,R)
+        det_vect[:] = numpy.dot(det_vect,R)            
                 
         # Add translation:
-        vect_norm = det_axis_vrt[2]
+        vect_norm = numpy.sqrt((det_axis_vrt ** 2).sum())
+
+        # Take into account that the center of rotation should be in the center of reconstruction volume:        
+        # T = numpy.array([geometry['vol_mag'] * vect_norm / det_pixel[1], geometry['vol_hrz'] * vect_norm / det_pixel[1], geometry['vol_vrt'] * vect_norm / det_pixel[0]])    
+        T = numpy.array([geometry['vol_tra'][1] * vect_norm / det_pixel[1], geometry['vol_tra'][2] * vect_norm / det_pixel[1], geometry['vol_tra'][0] * vect_norm / det_pixel[0]])    
         
-        T = numpy.array([geometry['vol_mag'] * vect_norm / det_pixel[1], geometry['vol_hrz'] * vect_norm / det_pixel[1], geometry['vol_vrt'] * vect_norm / det_pixel[0]])    
-        src_vect[:] -= T            
-        det_vect[:] -= T
+        src_vect[:] -= numpy.dot(T, R)           
+        det_vect[:] -= numpy.dot(T, R)
+        
+    #print('vol_tra', geometry['vol_tra'])
+    #print('det_pixel', det_pixel)
+    #print('vect_norm', vect_norm)
+    #print('T', T)
     
+        
     proj_geom['Vectors'] = vectors    
     
     return proj_geom   
@@ -456,7 +469,7 @@ def create_geometry(src2obj, det2obj, det_pixel, theta_range, theta_count):
     # Create an empty dictionary:
     geometry = {'det_pixel':det_pixel, 'det_hrz':0., 'det_vrt':0., 'det_mag':0., 
     'src_hrz':0., 'src_vrt':0., 'src_mag':0., 'axs_hrz':0., 'det_rot':0., 
-    'vol_rot':[0. ,0. ,0.], 'vol_hrz':0., 'vol_vrt':0., 'vol_mag':0.,
+    'vol_rot':[0. ,0. ,0.], 'vol_hrz':0., 'vol_tra':[0., 0., 0.], 'vol_mag':0.,
     'src2obj': src2obj, 'det2obj':det2obj, 'unit':'millimetre', 'type':'flex', 'binning': 1}
     
     geometry['src2det'] = geometry.get('src2obj') + geometry.get('det2obj')
@@ -532,8 +545,10 @@ def tiles_shape(shape, geometry_list):
     geometry['det_vrt'] = (max_y + min_y) / 2
     
     # Update volume center:
-    geometry['vol_vrt'] = (geometry['det_vrt'] * geometry['src2obj'] + geometry['src_vrt'] * geometry['det2obj']) / geometry.get('src2det')
-    geometry['vol_hrz'] = (geometry['det_hrz'] + geometry['src_hrz']) / 2
+    #geometry['vol_vrt'] = (geometry['det_vrt'] * geometry['src2obj'] + geometry['src_vrt'] * geometry['det2obj']) / geometry.get('src2det')
+    #geometry['vol_hrz'] = (geometry['det_hrz'] + geometry['src_hrz']) / 2
+    geometry['vol_tra'][0] = (geometry['det_vrt'] * geometry['src2obj'] + geometry['src_vrt'] * geometry['det2obj']) / geometry.get('src2det')
+    geometry['vol_tra'][2] = (geometry['det_hrz'] + geometry['src_hrz']) / 2
 
     return new_shape, geometry
                  
@@ -634,7 +649,8 @@ def _correct_flex_(records):
     records['det_hrz'] -= centre[0] / records.get('binning') * records['det_pixel']
     
     vol_center = (records['det_vrt'] * records['src2obj'] + records['src_vrt'] * records['det2obj']) / records.get('src2det')
-    records['vol_vrt'] = vol_center
+    #records['vol_vrt'] = vol_center
+    records['vol_tra'][0] = vol_center
     
     maginfication = (records['det2obj'] + records['src2obj']) / records['src2obj']
 

@@ -9,8 +9,8 @@ This module allows to create a pipeline of operations. Each data unit trickles t
 """
 #import os
 import numpy
-from scipy import ndimage
-from scipy import signal
+#from scipy import ndimage
+#from scipy import signal
 import time
 import gc
 import os
@@ -69,7 +69,25 @@ class Block:
         Checks if this action was applied and finished.
         """
         return not ([name, condition] in self.todo)
-                
+        
+    def flush(self):
+        
+        self.data = []
+        self.flat = []
+        self.dark = []
+        
+        gc.collect()
+        
+        time.sleep(1)
+        
+        print('Data flushed.')
+        
+    def __del__(self):
+        """
+        Clear the memory.
+        """
+        self.flush()        
+                        
 class Action:
     """
     A batch job operation applied to a nuber of datasets.
@@ -101,6 +119,9 @@ class Pipe:
         # Data:
         self._data_que_ = []  
 
+        # Current block in the data que:
+        self._block_ = []
+    
         # Buffer for group actions:
         self._buffer_ = {}
 
@@ -111,25 +132,25 @@ class Pipe:
         self._memmaps_ = []    
 
         # This one maps function names to callback funtions:
-        self._callback_dictionary_ = {'scan_flexray': self._scan_flexray_, 'read_flexray': self._read_flexray_, 
+        self._callback_dictionary_ = {'shift': self._shift_, 'scan_flexray': self._scan_flexray_, 'read_flexray': self._read_flexray_, 
         'read_all_meta': self._read_all_meta_, 'process_flex': self._process_flex_, 'shape': self._shape_, 'crop': self._crop_,
         'merge_detectors': self._merge_detectors_, 'merge_volume': self._merge_volume_, 'find_rotation': self._find_rotation_,
         'fdk': self._fdk_,'sirt': self._sirt_, 'write_flexray': self._write_flexray_, 'cast2int':self._cast2int_, 
-        'display':self._display_, 'memmap':self._memmap_, 'read_volume': self._read_volume_, 'equalize_histogram': self._equalize_histogram_,
+        'display':self._display_, 'memmap':self._memmap_, 'read_volume': self._read_volume_, 'equalize_intensity': self._equalize_intensity_,
         'equalize_resolution': self._equalize_resolution_, 'register_volumes': self._register_volumes_}
         
         # This one maps function names to condition that have to be used with them:
-        self._condition_dictionary_ = {'scan_flexray': ['path'], 'read_flexray': ['sampling'], 'register_volumes':[], 
-        'read_all_meta':[],'process_flex': [], 'shape': ['shape'],'sirt': [], 'find_rotation':[], 'equalize_histogram':[],
+        self._condition_dictionary_ = {'shift':['shift'], 'scan_flexray': ['path'], 'read_flexray': ['sampling'], 'register_volumes':[], 
+        'read_all_meta':[],'process_flex': [], 'shape': ['shape'],'sirt': [], 'find_rotation':[], 'equalize_intensity':[],
         'merge_detectors': ['memmap'], 'merge_volume':['memmap'], 'fdk': [], 'write_flexray': ['folder'], 'crop': ['crop'],
         'cast2int':['bounds'], 'display':[], 'memmap':['path'], 'read_volume': [], 'equalize_resolution':[]}
         
         # This one maps function names to function types. There are three: batch, standby, coincident
-        self._type_dictionary_ = {'scan_flexray': 'batch', 'read_flexray': 'batch', 'find_rotation':'batch',
+        self._type_dictionary_ = {'shift':'batch', 'scan_flexray': 'batch', 'read_flexray': 'batch', 'find_rotation':'batch',
         'read_all_meta':'concurrent', 'process_flex': 'batch', 'shape': 'batch', 'sirt':'batch','equalize_resolution':'batch',
         'merge_detectors': 'standby', 'merge_volume':'standby', 'fdk': 'batch', 'write_flexray': 'batch', 'crop': 'batch', 
         'cast2int':'batch', 'display':'batch', 'memmap':'batch', 'read_volume': 'batch','register_volumes':'batch', 
-        'equalize_histogram':'batch'}
+        'equalize_intensity':'batch'}
         
         # If pipe is provided - copy it's action que!
         if pipe:
@@ -264,25 +285,24 @@ class Pipe:
         
         # In case connected to other pipes:
         self.refresh_connections()                
-        
         self.refresh_schedules()
         
         print(' *** Starting a pipe run *** ')
         
         # While all datasets are not ready:
         while not self._is_ready_():
- 
-            print('------------------------')
-            print('New data block in the pipline!')
             
-            # Pick a data block:
-            block = self._pick_data_()
-            
+            # Pick a data block (flush old if needed):   
+            if self._block_:
+                self._block_.flush()
+                
+            self._block_ = self._pick_data_()
+        
             # Trickle the bastard down the pipe!
             for action in self._action_que_:
                 
                 # If this block was put on standby - stop and go to the next one.
-                if (block.status == 'standby'): 
+                if (self._block_.status == 'standby'): 
                     break
             
                 # If action applies to all blocks at the same time:
@@ -291,21 +311,21 @@ class Pipe:
                     
                         # Apply action:
                         action.count += 1
-                        action.callback(block, action.conditions, action.count) 
-                        block.finish(action.name, action.conditions)
+                        action.callback(self._block_, action.conditions, action.count) 
+                        self._block_.finish(action.name, action.conditions)
                     
                 # Check if action was already finished for this dataset:
-                if not block.isfinished(action.name, action.conditions):
+                if not self._block_.isfinished(action.name, action.conditions):
                     
                     # If the action is group action...
                     if action.type == 'standby':
                         
                         # Switch block status to standby
-                        block.status = 'standby'
+                        self._block_.status = 'standby'
                         
                         # if all data is on standby:
                         if self._is_standby_(): 
-                            block.status = 'pending'
+                            self._block_.status = 'pending'
                     
                     # Action counter increase:
                     action.count += 1
@@ -314,12 +334,15 @@ class Pipe:
                     #print(block.data)
                     
                     # Apply action
-                    action.callback(block, action.conditions, action.count)
+                    action.callback(self._block_, action.conditions, action.count)
+                    
+                    # Collect garbage:
+                    gc.collect() 
                             
                     # Make an end log record
-                    block.finish(action.name, action.conditions)
+                    self._block_.finish(action.name, action.conditions)
                     
-            block.status = 'ready'    
+            self._block_.status = 'ready'    
         
     def report(self):
         """
@@ -365,6 +388,9 @@ class Pipe:
         """
         Pick data from the data pool
         """
+        
+        print('Picking a new data block.')
+        
         # Finds the ones pending:
         pending = [block for block in self._data_que_ if block.status == 'pending']
             
@@ -441,9 +467,13 @@ class Pipe:
         
         if memmap:
             self._memmaps_.append(memmap)
-        
-        # Read projections:    
+
+        # Delete old data:
+        data.data = None
+        data.dark = None
+        data.flat = None
             
+        # Read projections:                
         data.dark = flexData.read_raw(path, 'di', sample = [samp, samp])
         data.flat = flexData.read_raw(path, 'io', sample = [samp, samp])    
         
@@ -456,6 +486,8 @@ class Pipe:
         data.flat = flexData.raw2astra(data.flat)    
         
         data.type = 'projections'
+        
+        gc.collect()
                 
     def _process_flex_(self, data, condition, count):
         """
@@ -645,6 +677,9 @@ class Pipe:
 
         # Replace projection data with volume data:
         data.data = vol
+        
+        # Try to collect the garbage:
+        gc.collect()
                 
     def _shape_(self, data, condition, count):
         """
@@ -748,6 +783,16 @@ class Pipe:
         flexData.write_raw(os.path.join(data.path,  folder), name, data.data, dim = dim, skip = skip)
         flexData.write_meta(os.path.join(data.path, folder, 'meta.toml'), data.meta)  
         
+    def _shift_(self, data, condition, count):
+        """
+        Shift the data by afixed amount.
+        """
+        axis = condition.get('axis')
+        shift = condition.get('shift')
+        
+        data.data = flexCompute.translate(data.data, shift = shift, axis = axis)
+        
+        
     def _register_volumes_(self, data, condition, count):
         """
         Register all volumes to the first one in the que.
@@ -764,7 +809,7 @@ class Pipe:
                          
         else:
             # Register volumes
-            T, R = flexCompute.register_volumes(self._buffer_['fixed'], data.data, subsamp = 1, use_CG = True)
+            T, R = flexCompute.register_volumes(self._buffer_['fixed'], data.data, subsamp = 2, use_CG = True, monochrome = False)
             
             # Resample the moving volume:
             data.data = flexCompute.affine(data.data, R, T)
@@ -777,7 +822,7 @@ class Pipe:
         if len(self._data_que_) == count:  
             del self._buffer_['fixed']
         
-    def _equalize_histogram_(self, data, condition, count):
+    def _equalize_intensity_(self, data, condition, count):
         """
         Equalize the intensity levels based on histograms.
         """
@@ -790,7 +835,7 @@ class Pipe:
             self._buffer_['range'] = rng
 
             # This interefers with principal range. Use it only after!
-            data.data = flexCompute.remove_dark(data.data)
+            data.data = flexCompute.binary_threshold(data.data)
                          
         else:
              
@@ -806,7 +851,7 @@ class Pipe:
              data.data[data.data < rng_0[0]] = rng_0[0]
              
              # This interefers with principal range. Use it only after!
-             data.data = flexCompute.remove_dark(data.data)
+             data.data = flexCompute.binary_threshold(data.data)
             
         # Last call:   
         if len(self._data_que_) == count:
@@ -853,6 +898,7 @@ class Pipe:
         if fact != 1:
             
             print('From %uum to %uum' % (data.meta['geometry']['img_pixel']*1e3, pix_max*1e3))    
+            print('fact', fact)
             
             data.data = flexCompute.scale(data.data, fact)
             data.meta['geometry']['img_pixel'] /= fact
@@ -873,7 +919,7 @@ class Pipe:
                 elif crop > 0:
                     # Pad case:
                     data.data = flexUtil.pad(data.data, dim, crop, symmetric = True)
-             
+            
         # Report:
         mass = numpy.sum(data.data > 0) / numpy.prod(data.data.shape)    
         print('Nonzero pixels: %0.3f of the volume.' % mass)

@@ -146,23 +146,21 @@ def plot(x, y = None, semilogy = False, title = None):
 
 def display_slice(data, index = None, dim = 0, bounds = None, title = None):
     
+    # Just in case squeeze:
+    data = numpy.squeeze(data)
+    
     # If the image is 2D:
     if data.ndim == 2:
-        plt.figure(figsize=(20,10))
-        plt.imshow(data)
-        plt.colorbar()
-        plt.show()
-        return
+        img = data
         
-    # Else:
-        
-    if index is None:
-        index = data.shape[dim] // 2
-
-    sl = anyslice(data, index, dim)
-
-    img = numpy.squeeze(data[sl])
+    else:
+        if index is None:
+            index = data.shape[dim] // 2
     
+        sl = anyslice(data, index, dim)
+    
+        img = numpy.squeeze(data[sl])
+        
     plt.figure()
     if bounds:
         plt.imshow(img, vmin = bounds[0], vmax = bounds[1])
@@ -176,12 +174,17 @@ def display_slice(data, index = None, dim = 0, bounds = None, title = None):
         
     plt.show()    
 
-def display_projection(data, dim = 1, title = None):
+def display_projection(data, dim = 1, bounds = None, title = None):
     
     img = data.sum(dim)
     
     plt.figure()
-    plt.imshow(img)
+    
+    if bounds:
+        plt.imshow(img, vmin = bounds[0], vmax = bounds[1])
+    else:
+        plt.imshow(img)
+        
     plt.colorbar()
     
     if title:
