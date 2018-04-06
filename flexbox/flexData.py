@@ -617,7 +617,7 @@ def _sanity_check_(records):
     for word in minimum_set:
         if word not in records: raise ValueError('Missing records in the meta data. Something wrong with the log file?')
         
-        if type(records[word]) != float: raise ValueError('Wrong records in the meta data. Something wrong with the log file?')
+        if type(records[word]) != float: raise ValueError('Wrong records in the meta data. Something wrong with the log file?', word, records[word])
 
 def _correct_flex_(records):   
     """

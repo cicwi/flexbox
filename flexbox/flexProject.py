@@ -220,7 +220,7 @@ def FDK(projections, volume, geometry):
     
     flexUtil.progress_bar(1) 
     
-def _block_index_(ii, block_number, length, mode = None):
+def _block_index_(ii, block_number, length, mode = 'sequential'):
     """
     Create a slice for a projection block
     """   
@@ -245,7 +245,7 @@ def _block_index_(ii, block_number, length, mode = None):
         
     else:
         raise ValueError('Indexer type not recognized! Use: sequential/random/equidistant')
-        
+    
     first = ii * block_length
     last = min((length + 1, (ii + 1) * block_length))
     
@@ -312,7 +312,8 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
         # Take into account Poisson:
         if options.get('poisson_weight'):
             # Some formula representing the effect of photon starvation...
-            block *= numpy.sqrt(numpy.exp(-projections[:, index, :]))    
+            #block *= numpy.sqrt(numpy.exp(-projections[:, index, :]))    
+            block *= numpy.exp(-projections[:, index, :])
             
         block *= prj_weight * block_number
         
@@ -334,7 +335,7 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
 
 def _em_step_(projections, prj_weight, volume, geometry, options):
     """
-    Update volume: single SIRT step.
+    Update volume: single EM step.
     """
     
     # CTF, mode of indexing:
@@ -366,6 +367,7 @@ def _em_step_(projections, prj_weight, volume, geometry, options):
         # Copy data to a block or simply pass a pointer to data itself if block is one.
         if (mode == 'sequential') & (block_number == 1):
             block = projections
+            
         else:
             block = (projections[:, index, :])
         
@@ -380,12 +382,12 @@ def _em_step_(projections, prj_weight, volume, geometry, options):
             synth = flexModel.apply_ctf(synth, ctf)
 
         # Compute residual:        
-        synth[synth < 1e-12] = numpy.inf  
+        synth[synth < 1e-10] = numpy.inf  
         synth = (block / synth)
                     
         # L2 norm (use the last block to update):
         if options.get('l2_update'):
-            #l2 = (numpy.sqrt(((synth) ** 2).mean()))
+            
             _synth = synth[synth > 0]
             l2 = _synth.std()
             
@@ -529,3 +531,47 @@ def EM(projections, volume, geometry, iterations, options = {'preview':False, 'b
          plt.figure(15)
          plt.plot(l2)
          plt.title('Residual L2')
+
+def EM_tiled(projections, volume, geometries, iterations, options = {'poisson_weight': False, 'l2_update': True, 'preview':False, 'bounds':None, 'block_number':1, 'index':'sequential', 'ctf': None}):
+    """
+    EM: tiled version.
+    """     
+    # Make sure that the volume is positive:
+    if volume.max() <= 0: 
+        volume *= 0
+        volume += 1
+    elif volume.min() < 0: volume[volume < 0] = 0
+
+    for proj in projections:
+        proj[proj < 0] = 0
+
+    # Initialize L2:
+    l2 = []
+
+    print('Em Emm Emmmm...')
+    
+    flexUtil.progress_bar(0)
+        
+    for ii in range(iterations):
+        
+        #l2_ = 0
+        for ii, proj in enumerate(projections):
+            
+            geom = geometries[ii]
+
+            # Update volume:
+            l2_ = _em_step_(proj, 1, volume, geom, options)
+            
+        l2.append(l2_)
+                    
+        # Preview
+        if options.get('preview'):
+            flexUtil.display_slice(volume, dim = 0)
+            
+        flexUtil.progress_bar((ii+1) / iterations)
+        
+    if options.get('l2_update'):   
+
+         plt.figure(15)
+         plt.plot(l2)
+         plt.title('Residual L2') 

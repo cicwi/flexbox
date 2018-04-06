@@ -462,6 +462,45 @@ def register_volumes(fixed, moving, subsamp = 2, use_moments = True, use_CG = Tr
     print('Found Euler rotations:', transforms3d.euler.mat2euler(Rtot))        
     
     return Rtot, Ttot * subsamp 
+    
+def transform_to_geometry(R, T, geom):
+    """
+    Transforms a rotationa matrix and translation vector. 
+    """    
+    # Translate to flex geometry:
+    geom = geom.copy()
+    geom['vol_rot'] = transforms3d.euler.mat2euler(R.T, axes = 'sxyz')
+    geom['vol_tra'] = numpy.array(geom['vol_tra']) - numpy.dot(T, R.T)[[0, 2, 1]] * geom['det_pixel']
+    
+    return geom
+    
+def register_astra_geometry(proj_fix, proj_mov, geom_fix, geom_mov):
+    """
+    Compute a rigid transformation that makes sure that two reconstruction volumes are alligned.
+    Args:
+        proj_fix : projection data of the fixed volume
+        proj_mov : projection data of the fixed volume
+        geom_fix : projection data of the fixed volume
+        geom_mov : projection data of the fixed volume
+        
+    Returns:
+        geom : geometry for the second reconstruction volume
+    """
+    
+    print('Computing a rigid tranformation between two datasets.')
+    
+    # Find maximum vol size:
+    sz = numpy.array([proj_fix.shape, proj_mov.shape]).max(0)    
+    vol1 = numpy.zeros(sz, dtype = 'float32')
+    vol2 = numpy.zeros(sz, dtype = 'float32')
+    
+    flexProject.FDK(proj_fix, vol1, geom_fix)
+    flexProject.FDK(proj_mov, vol2, geom_mov)
+    
+    # Find transformation between two volumes:
+    R, T = register_volumes(vol1, vol2, subsamp = 2, use_moments=True, use_CG=True)
+    
+    return R, T
 
 def scale(data, factor):
     '''
