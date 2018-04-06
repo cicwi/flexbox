@@ -22,5 +22,5 @@ meta = flexData.read_log(path, 'flexray')
 
 # Write:
 flexData.write_meta(os.path.join(path, 'flexray.toml'), meta)
-flexData.write_astra(os.path.join(path, 'projection.geom'), data_shape, meta)
+flexData.write_astra(os.path.join(path, 'projection.geom'), data_shape, meta['geometry'])
 

@@ -73,3 +73,8 @@ vol = numpy.zeros([10, 1200, 1200], dtype = 'float32')
 flex.project.FDK(proj, vol, geometry)
 
 flex.util.display_projection(vol, dim = 0, bounds = [], title = 'FDK')
+
+#%% Save geometry:
+import os
+    
+flex.data.write_astra(os.path.join(path, 'projection.geom'), proj.shape, geometry)

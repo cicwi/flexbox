@@ -263,11 +263,11 @@ def write_meta(filename, meta):
     with open(filename, 'w') as f:
         toml.dump(meta, f)
         
-def write_astra(filename, data_shape, meta):
+def write_astra(filename, data_shape, geometry):
     """
     Write an astra-readable projection geometry vector.
     """        
-    geom = astra_proj_geom(meta['geometry'], data_shape)
+    geom = astra_proj_geom(geometry, data_shape)
     
     # Make path if does not exist:
     path = os.path.dirname(filename)
