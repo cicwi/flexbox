@@ -10,6 +10,7 @@ import numpy
 from scipy import ndimage
 from scipy import signal
 import transforms3d
+import scipy.ndimage.interpolation as interp
 
 from . import flexUtil
 from . import flexData
@@ -986,46 +987,66 @@ def _find_shift_(data_ref, data_slave, offset, dim = 1):
             # Shift registration with subpixel accuracy (skimage):
             shift, error, diffphase = feature.register_translation(im_ref, im_slv, 10)
             
+            if shift[0] is numpy.nan:
+                flexUtil.display_slice(im_ref, title = 'ref')
+                flexUtil.display_slice(im_slv, title = 'slv')
+            
             shifts.append(shift)
 
     shifts = numpy.array(shifts)            
     
-    if shifts.size > 0:        
+    if shifts.size == 0:        
+        shift = [0, 0]
         
+    else:
         # prune around mean:
         mean = numpy.mean(shifts, 0)    
         
-        #print('shifts', shifts)
-        #print('mean', mean)
-        
         error = (shifts - mean[None, :])
-        #print('error', error)
         
         error = numpy.sqrt(error[:, 0] ** 2 + error[:, 1] ** 2)
-        error = error / numpy.sqrt(mean[None, 0]**2+mean[None, 1])
+        mean = numpy.sqrt(mean[None, 0]**2 + mean[None, 1]**2)
         
-        #print('error**', error)
-        
-        shifts = shifts[error < 1]
+        shifts = shifts[error < mean]
 
-        # total:        
-        shift = numpy.mean(shifts, 0)    
-        std = numpy.std(shifts, 0)
-        
-        shift_norm = numpy.sqrt(shift[0]**2+shift[1]**2)
-        std_norm = numpy.sqrt(std[0]**2+std[1]**2)
-
-        # Chech that std is at least 2 times less than the shift estimate:
-        if std_norm  < shift_norm / 2:    
-            print('Found shift:', shift, 'with STD:', std)
-        else:
-            print('Found shift:', shift, 'with STD:', std, ". STD too high! Automatic shift correction is not applied." )
+        if shifts.size == 0:
+            
             shift = [0, 0]
-
-    else:
-        shift = [0, 0]
+            
+        else:
+            
+            # total:        
+            shift = numpy.mean(shifts, 0)    
+            std = numpy.std(shifts, 0)
+            
+            shift_norm = numpy.sqrt(shift[0]**2+shift[1]**2)
+            std_norm = numpy.sqrt(std[0]**2+std[1]**2)
     
-    return shift
+            print('Found shift:', shift, 'with STD:', std)
+            
+            # Check that std is at least 2 times less than the shift estimate:
+            if (std_norm > shift_norm / 2)|(shift_norm < 1):    
+                    print('Bad shift. Discarding it.')
+                    shift = [0, 0]
+                
+    return shift 
+
+def _append_(total, new, x_offset, y_offset, pad_x, pad_y, base_dist, new_dist):
+    """
+    Append a new image to total via interpolation:
+    """
+    
+    # Pad to match sizes:
+    new = numpy.pad(new.copy(), ((0, pad_y), (0, pad_x)), mode = 'constant')  
+    
+    # Apply shift:
+    if (x_offset != 0) | (y_offset != 0):   
+        
+        # Shift image:
+        new = interp.shift(new, [y_offset, x_offset], order = 1)
+    
+    # Create distances to edge:
+    return ((base_dist * total) + (new_dist * new)) / norm
     
 def append_tile(data, geom, tot_data, tot_geom):
     """
@@ -1038,9 +1059,7 @@ def append_tile(data, geom, tot_data, tot_geom):
         tot_geom: output geometry
         
     """ 
-    
-    import scipy.ndimage.interpolation as interp
-    
+        
     print('Stitching a tile...')               
     
     # Assuming all projections have equal number of angles and same pixel sizes
@@ -1075,7 +1094,28 @@ def append_tile(data, geom, tot_data, tot_geom):
     y_offset += shift[0]
            
     flexUtil.progress_bar(0) 
-
+    
+    # Precompute weights:
+    base0 = (tot_data[:, ::100, :].mean(1)) != 0
+    
+    new0 = numpy.zeros_like(base0)
+    # Shift image:
+    new0[:det_shape[0], :det_shape[1]] = 1.0
+    new0 = interp.shift(new0, [y_offset, x_offset], order = 1)
+    #new0[y_offset:int(y_offset+det_shape[0]), x_offset:int(x_offset + det_shape[1])] = 1.0
+    
+    base_dist = ndimage.distance_transform_bf(base0)    
+    new_dist =  ndimage.distance_transform_bf(new0)    
+     
+    # Trim edges to avoid interpolation errors:
+    base_dist -= 1    
+    new_dist -= 1
+    
+    base_dist *= base_dist > 0
+    new_dist *= new_dist > 0
+    norm = (base_dist + new_dist)
+    norm[norm == 0] = numpy.inf
+    
     # Apply offsets:
     for ii in range(tot_data.shape[1]):   
         
@@ -1084,47 +1124,25 @@ def append_tile(data, geom, tot_data, tot_geom):
         
         # Apply shift:
         if (x_offset != 0) | (y_offset != 0):   
+            
+            # Shift image:
             new = interp.shift(new, [y_offset, x_offset], order = 1)
                     
         # Add two images in a smart way:
         base = tot_data[:, ii, :]  
-
-        # Compute proportions of the total data and new projection:
-        base_dist = ndimage.distance_transform_bf(base != 0)    
-        new_dist =  ndimage.distance_transform_bf(new != 0)    
-                 
-        # Trim edges:
-        base_dist -= 1    
-        new_dist -= 1
         
-        base_dist *= base_dist > 0
-        new_dist *= new_dist > 0
-        
-        #nozero = (numpy.abs(proj - base) / (numpy.abs(proj) + 1e-5) < 0.2)
-        #zero = numpy.logical_not(nozero)
-        
-        #base[nozero] = numpy.mean((proj, base), 0)[nozero]
-        #base[zero] = numpy.max((proj, base), 0)[zero]
-        #base = numpy.max((new, base), 0)
-
-        norm = (base_dist + new_dist)
-        norm[norm == 0] = numpy.inf
-
-        #flexUtil.display_slice(base_dist, title = 'base_dist')
-        #flexUtil.display_slice(base, title = 'base')
-        
-        #flexUtil.display_slice(new_dist, title = 'new_dist')
-        #flexUtil.display_slice(new, title = 'new')
-        
-        #flexUtil.display_slice(((base_dist * base) + (new_dist * new)) / norm, title = 'added')
-        
+        # Create distances to edge:
         tot_data[:, ii, :] = ((base_dist * base) + (new_dist * new)) / norm
-
-        #tot_data[:, ii, :] = tot_data[:, ii, :] + new_dist
-
-        #tot_data[:, ii, :] = numpy.max((new, base), 0)
         
         flexUtil.progress_bar((ii+1) / tot_data.shape[1])
+    
+    #flexUtil.display_slice(new_dist, title = 'new_dist')    
+    #flexUtil.display_slice(base_dist, title = 'base_dist')    
+    
+    #flexUtil.display_slice(base, title = 'base')    
+    #flexUtil.display_slice(new, title = 'new')        
+    
+    #flexUtil.display_slice(tot_data[:, ii, :], title = 'tot_data')    
         
 def apply_edge_ramp(data, width):
     '''

@@ -548,7 +548,8 @@ def tiles_shape(shape, geometry_list):
     #geometry['vol_vrt'] = (geometry['det_vrt'] * geometry['src2obj'] + geometry['src_vrt'] * geometry['det2obj']) / geometry.get('src2det')
     #geometry['vol_hrz'] = (geometry['det_hrz'] + geometry['src_hrz']) / 2
     geometry['vol_tra'][0] = (geometry['det_vrt'] * geometry['src2obj'] + geometry['src_vrt'] * geometry['det2obj']) / geometry.get('src2det')
-    geometry['vol_tra'][2] = (geometry['det_hrz'] + geometry['src_hrz']) / 2
+    #geometry['vol_tra'][2] = (geometry['det_hrz'] + geometry['src_hrz']) / 2
+    geometry['vol_tra'][2] = geometry['axs_hrz']
 
     return new_shape, geometry
                  
