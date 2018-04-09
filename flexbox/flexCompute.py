@@ -891,7 +891,8 @@ def process_flex(path, options = {'bin':1, 'memmap': None}):
     dark = flexData.read_raw(path, 'di', sample = [bins, bins])
     flat = flexData.read_raw(path, 'io', sample = [bins, bins])    
     
-    proj = flexData.read_raw(path, 'scan_', skip = bins, sample = [bins, bins], memmap = memmap)
+    index = []
+    proj = flexData.read_raw(path, 'scan_', skip = bins, sample = [bins, bins], memmap = memmap, index = index)
 
     meta = flexData.read_log(path, 'flexray', bins = bins)   
             
@@ -907,6 +908,22 @@ def process_flex(path, options = {'bin':1, 'memmap': None}):
     proj[~numpy.isfinite(proj)] = 0
     
     proj = flexData.raw2astra(proj)    
+    
+    # Here we will also check whether all files were read and if not - modify thetas accordingly:
+    index = numpy.array(index)
+    index //= bins
+    
+    if proj.shape[1] != index.size:
+        print('Seemes like some files were corrupted. We will try to correct thetas accordingly.')
+        
+        thetas = numpy.linspace(meta['geometry']['theta_min'], meta['geometry']['theta_max'], index[-1]+1)
+        thetas = thetas[index]
+        
+        meta['geometry']['_thetas_'] = thetas
+        
+        import pylab
+        pylab.plot(thetas, thetas ,'*')
+        pylab.title('Thetas')
     
     return proj, meta
 
@@ -1144,20 +1161,4 @@ def append_tile(data, geom, tot_data, tot_geom):
     
     #flexUtil.display_slice(tot_data[:, ii, :], title = 'tot_data')    
         
-def apply_edge_ramp(data, width):
-    '''
-    Apply ramp to the fringe of the tile to reduce artefacts.
-    '''
-    if numpy.size(width)>1:
-        w0 = width[0]
-        w1 = width[1]
-
-    else:   
-        w0 = width
-        w1 = width
-    
-    # Pad the data:
-    data = numpy.pad(data, ((w0, w0), (0,0),(w1, w1)), mode = 'linear_ramp', end_values = 0)
-    
-    return data
     

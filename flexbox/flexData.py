@@ -48,7 +48,7 @@ def read_flexray(path):
     
     return proj, flat, dark, meta
         
-def read_raw(path, name, skip = 1, sample = [1, 1], x_roi = [], y_roi = [], dtype = 'float32', memmap = None):
+def read_raw(path, name, skip = 1, sample = [1, 1], x_roi = [], y_roi = [], dtype = 'float32', memmap = None, index = None):
     """
     Read tiff files stack and return numpy array.
     
@@ -61,6 +61,7 @@ def read_raw(path, name, skip = 1, sample = [1, 1], x_roi = [], y_roi = [], dtyp
         y_roi ([y0, y1]): vertical range
         dtype (str or numpy.dtype): data type to return
         memmap (str): if provided, return a disk mapped array to save RAM
+        thetas (array): if provided, will exclude array elements that correspond to missing files
         
     Returns:
         numpy.array : 3D array with the first dimension representing the image index
@@ -70,14 +71,27 @@ def read_raw(path, name, skip = 1, sample = [1, 1], x_roi = [], y_roi = [], dtyp
     # Retrieve files, sorted by name
     files = _get_files_sorted_(path, name)
     
+    # Create index of existing files:
+    indx = numpy.array([int(re.findall(r'\d+', f)[-1]) for f in files])
+    
+    if indx.size > 1:
+        indx //= (indx[1] - indx[0])
+        indx -= indx.min()
+        
+        #print([ii for ii in numpy.where(indx % skip == 0)])
+        reduc = numpy.where(indx % skip == 0)[0]
+        
+        files = [files[ii] for ii in reduc]
+        indx = indx[indx % skip == 0]
+    
     if len(files) == 0: raise IOError('Files not found:', os.path.join(path, name))
     
     # Read the first file:
     image = _read_tiff_(files[0], sample, x_roi, y_roi)
     sz = numpy.shape(image)
     
-    file_n = len(files) // skip
-    
+    file_n = len(indx)
+        
     # Create a mapped array if needed:
     if memmap:
         data = numpy.memmap(memmap, dtype='float32', mode='w+', shape = (file_n, sz[0], sz[1]))
@@ -85,24 +99,42 @@ def read_raw(path, name, skip = 1, sample = [1, 1], x_roi = [], y_roi = [], dtyp
     else:    
         data = numpy.zeros((file_n, sz[0], sz[1]), dtype = numpy.float32)
     
-    # Read all files:
-    for ii in range(file_n):
+    # Read all files:  
+    good = []
+    
+    for k, ii in enumerate(indx):
+        #print(ii)
+        #print(files[ii])
+        filename = files[k]
         
-        filename = files[ii*skip]
         try:
             a = _read_tiff_(filename, sample, x_roi, y_roi)
-        except:
-            print('WARNING! FILE IS CORRUPTED. CREATING A BLANK IMAGE: ', filename)
-            a = numpy.zeros(data.shape[1:], dtype = numpy.float32)
             
-        if a.ndim > 2:
-          a = a.mean(2)
+            # Summ RGB:    
+            if a.ndim > 2:
+                a = a.mean(2)
          
-        #flexUtil.display_slice(a)    
-        data[ii, :, :] = a
+            #flexUtil.display_slice(a)    
+            data[k, :, :] = a
+            good.append(k)
+        
+        except:
+            pass
+            #a = numpy.zeros(data.shape[1:], dtype = numpy.float32)
+            
+        flexUtil.progress_bar((k+1) / (indx.size))
 
-        flexUtil.progress_bar((ii+1) / (numpy.shape(files)[0] // skip))
+    # Get rid of the corrupted data:
+    if len(good) != file_n:
+        print('WARNING! %u files are CORRUPTED!'%(file_n - len(good)))
+        
+        indx = indx[good]
+        data = data[good]
 
+    # Output index:
+    if index is not None:
+        index[:] = indx
+    
     print('%u files were loaded.' % file_n)
 
     return data    
@@ -373,7 +405,15 @@ def astra_proj_geom(geometry, data_shape, index = None, sample = [1, 1]):
     src2obj = geometry['src2obj']
     det2obj = geometry['det2obj']
 
-    thetas = numpy.linspace(geometry.get('theta_min'), geometry.get('theta_max'),theta_count, dtype = 'float32') / 180 * numpy.pi
+    # Check if _thetas_ are defined explicitly:
+    if geometry.get('_thetas_') is not None:
+        thetas = geometry['_thetas_'] / 180 * numpy.pi
+        
+        if len(thetas) != theta_count: 
+            raise IndexError('Length of the _thetas_ array doesn`t match withthe number of projections: %u v.s. %u' % (len(thetas), theta_count))
+    else:
+        
+        thetas = numpy.linspace(geometry.get('theta_min'), geometry.get('theta_max'),theta_count, dtype = 'float32') / 180 * numpy.pi
 
     # Inintialize ASTRA projection geometry to import vector from it
     if (index is not None):
@@ -484,6 +524,7 @@ def create_geometry(src2obj, det2obj, det_pixel, theta_range, theta_count):
     # Generate thetas explicitly:
     geometry['theta_max'] = theta_range[1]
     geometry['theta_min'] = theta_range[0]
+    #geometry['theta_num'] = theta_count
 
     return geometry 
         

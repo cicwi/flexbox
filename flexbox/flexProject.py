@@ -316,6 +316,9 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
             
         block *= prj_weight * block_number
         
+        # Apply ramp to reduce boundary effects:
+        block = flexUtil.apply_edge_ramp(block, 20, extend = False)
+        
         # L2 norm (use the last block to update):
         if options.get('l2_update'):
             l2 = (numpy.sqrt((block ** 2).mean()))
@@ -412,7 +415,7 @@ def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight':
     
     # We will use quick and dirty scaling coefficient instead of proper calculation of weights
     #m = (geometry['src2obj'] + geometry['det2obj']) / geometry['src2obj']
-    prj_weight = 1 / (projections.shape[1] * (geometry['img_pixel']) ** 4 * max(volume.shape))
+    prj_weight = 1 / (projections.shape[1] * (geometry['img_pixel']) ** 4 * max(volume.shape)) 
                     
     # Initialize L2:
     l2 = []
@@ -463,7 +466,8 @@ def SIRT_tiled(projections, volume, geometries, iterations, options = {'poisson_
             geom = geometries[ii]
 
             #m = (geom['src2obj'] + geom['det2obj']) / geom['src2obj']
-            prj_weight = 1 / (proj.shape[1] * (geom['img_pixel']) ** 4 * max(volume.shape))
+            # This weight is half of the normal weight to make sure convergence is ok:
+            prj_weight = 1 / (proj.shape[1] * (geom['img_pixel']) ** 4 * max(volume.shape)) 
     
             # Update volume:
             l2_ += _L2_step_(proj, prj_weight, volume, geom, options)

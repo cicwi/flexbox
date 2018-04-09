@@ -135,20 +135,20 @@ class Pipe:
         self._callback_dictionary_ = {'shift': self._shift_, 'scan_flexray': self._scan_flexray_, 'read_flexray': self._read_flexray_, 
         'read_all_meta': self._read_all_meta_, 'process_flex': self._process_flex_, 'shape': self._shape_, 'crop': self._crop_,
         'merge_detectors': self._merge_detectors_, 'merge_volume': self._merge_volume_, 'find_rotation': self._find_rotation_,
-        'fdk': self._fdk_,'sirt': self._sirt_, 'write_flexray': self._write_flexray_, 'cast2int':self._cast2int_, 
+        'fdk': self._fdk_,'tiled_sirt': self._tiled_sirt_, 'sirt': self._sirt_, 'write_flexray': self._write_flexray_, 'cast2int':self._cast2int_, 
         'display':self._display_, 'memmap':self._memmap_, 'read_volume': self._read_volume_, 'equalize_intensity': self._equalize_intensity_,
         'equalize_resolution': self._equalize_resolution_, 'register_volumes': self._register_volumes_}
         
         # This one maps function names to condition that have to be used with them:
         self._condition_dictionary_ = {'shift':['shift'], 'scan_flexray': ['path'], 'read_flexray': ['sampling'], 'register_volumes':[], 
-        'read_all_meta':[],'process_flex': [], 'shape': ['shape'],'sirt': [], 'find_rotation':[], 'equalize_intensity':[],
+        'read_all_meta':[],'tiled_sirt': [], 'process_flex': [], 'shape': ['shape'],'sirt': [], 'find_rotation':[], 'equalize_intensity':[],
         'merge_detectors': ['memmap'], 'merge_volume':['memmap'], 'fdk': [], 'write_flexray': ['folder'], 'crop': ['crop'],
         'cast2int':['bounds'], 'display':[], 'memmap':['path'], 'read_volume': [], 'equalize_resolution':[]}
         
         # This one maps function names to function types. There are three: batch, standby, coincident
         self._type_dictionary_ = {'shift':'batch', 'scan_flexray': 'batch', 'read_flexray': 'batch', 'find_rotation':'batch',
         'read_all_meta':'concurrent', 'process_flex': 'batch', 'shape': 'batch', 'sirt':'batch','equalize_resolution':'batch',
-        'merge_detectors': 'standby', 'merge_volume':'standby', 'fdk': 'batch', 'write_flexray': 'batch', 'crop': 'batch', 
+        'merge_detectors': 'standby', 'merge_volume':'standby', 'tiled_sirt': 'standby', 'fdk': 'batch', 'write_flexray': 'batch', 'crop': 'batch', 
         'cast2int':'batch', 'display':'batch', 'memmap':'batch', 'read_volume': 'batch','register_volumes':'batch', 
         'equalize_intensity':'batch'}
         
