@@ -18,6 +18,30 @@ import matplotlib.pyplot as plt
 # Use global time variable to measure time needed to compute stuff:        
 glob_time = 0
 
+def apply_edge_ramp(data, width, extend = True):
+    '''
+    Apply ramp to the fringe of the tile to reduce artefacts.
+    '''
+    if numpy.size(width)>1:
+        w0 = width[0]
+        w1 = width[1]
+
+    else:   
+        w0 = width
+        w1 = width
+    
+    # Pad the data:
+    if extend:
+        data = numpy.pad(data, ((w0, w0), (0,0),(w1, w1)), mode = 'linear_ramp', end_values = 0)
+        
+    else:
+        data[-width:, :, :] *= numpy.linspace(1, 0, width)[:, None, None]
+        data[:width, :, :] *= numpy.linspace(0, 1, width)[:, None, None]
+        data[:, :, -width:] *= numpy.linspace(1, 0, width)[None, None, :]
+        data[:, :, :width] *= numpy.linspace(0, 1, width)[None, None, :]
+        
+    return data
+
 def mult_dim(array, vector, dim):
     """
     Multiply a 3D array by a 1D vector along one of the dimensions.

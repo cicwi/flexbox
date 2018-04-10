@@ -135,20 +135,20 @@ class Pipe:
         self._callback_dictionary_ = {'shift': self._shift_, 'scan_flexray': self._scan_flexray_, 'read_flexray': self._read_flexray_, 
         'read_all_meta': self._read_all_meta_, 'process_flex': self._process_flex_, 'shape': self._shape_, 'crop': self._crop_,
         'merge_detectors': self._merge_detectors_, 'merge_volume': self._merge_volume_, 'find_rotation': self._find_rotation_,
-        'fdk': self._fdk_,'sirt': self._sirt_, 'write_flexray': self._write_flexray_, 'cast2int':self._cast2int_, 
+        'fdk': self._fdk_,'tiled_sirt': self._tiled_sirt_, 'sirt': self._sirt_, 'write_flexray': self._write_flexray_, 'cast2int':self._cast2int_, 
         'display':self._display_, 'memmap':self._memmap_, 'read_volume': self._read_volume_, 'equalize_intensity': self._equalize_intensity_,
         'equalize_resolution': self._equalize_resolution_, 'register_volumes': self._register_volumes_}
         
         # This one maps function names to condition that have to be used with them:
         self._condition_dictionary_ = {'shift':['shift'], 'scan_flexray': ['path'], 'read_flexray': ['sampling'], 'register_volumes':[], 
-        'read_all_meta':[],'process_flex': [], 'shape': ['shape'],'sirt': [], 'find_rotation':[], 'equalize_intensity':[],
+        'read_all_meta':[],'tiled_sirt': [], 'process_flex': [], 'shape': ['shape'],'sirt': [], 'find_rotation':[], 'equalize_intensity':[],
         'merge_detectors': ['memmap'], 'merge_volume':['memmap'], 'fdk': [], 'write_flexray': ['folder'], 'crop': ['crop'],
         'cast2int':['bounds'], 'display':[], 'memmap':['path'], 'read_volume': [], 'equalize_resolution':[]}
         
         # This one maps function names to function types. There are three: batch, standby, coincident
         self._type_dictionary_ = {'shift':'batch', 'scan_flexray': 'batch', 'read_flexray': 'batch', 'find_rotation':'batch',
         'read_all_meta':'concurrent', 'process_flex': 'batch', 'shape': 'batch', 'sirt':'batch','equalize_resolution':'batch',
-        'merge_detectors': 'standby', 'merge_volume':'standby', 'fdk': 'batch', 'write_flexray': 'batch', 'crop': 'batch', 
+        'merge_detectors': 'standby', 'merge_volume':'standby', 'tiled_sirt': 'standby', 'fdk': 'batch', 'write_flexray': 'batch', 'crop': 'batch', 
         'cast2int':'batch', 'display':'batch', 'memmap':'batch', 'read_volume': 'batch','register_volumes':'batch', 
         'equalize_intensity':'batch'}
         
@@ -189,7 +189,8 @@ class Pipe:
             pipe.flush()
             
         # Data:
-        self._data_que_.clear()
+        if self._data_que_:
+            self._data_que_.clear()
         
         # CLear count for actions:
         for action in self._action_que_:
@@ -265,6 +266,8 @@ class Pipe:
                 
                 # Copy data_que:
                 self._data_que_.extend(pipe._data_que_)
+                
+                pipe._data_que_ = None
                 
                 # Reset the que status:
                 for data in self._data_que_:
@@ -463,8 +466,12 @@ class Pipe:
         path = data.path
         
         samp = condition.get('sampling')
+        skip = condition.get('skip')
         memmap = condition.get('memmap')
         
+        if skip is None:
+            skip = samp
+            
         if memmap:
             self._memmaps_.append(memmap)
 
@@ -477,7 +484,7 @@ class Pipe:
         data.dark = flexData.read_raw(path, 'di', sample = [samp, samp])
         data.flat = flexData.read_raw(path, 'io', sample = [samp, samp])    
         
-        data.data = flexData.read_raw(path, 'scan_', skip = samp, sample = [samp, samp], memmap = memmap)
+        data.data = flexData.read_raw(path, 'scan_', skip = skip, sample = [samp, samp], memmap = memmap)
     
         data.meta = flexData.read_log(path, 'flexray', bins = samp)   
                 
@@ -534,7 +541,8 @@ class Pipe:
                 total = numpy.zeros(tot_shape, dtype='float32')          
                 
             self._buffer_['tot_geom'] = tot_geom
-                
+            self._buffer_['total'] = total
+            
         else:            
             
             # Add data to existing buffer:
@@ -584,7 +592,8 @@ class Pipe:
                 if not data_.meta:
                     raise Exception('Meta data is not initialized for all data blocks! Use read_all_meta!')
                     
-                vol_z.append(data_.geometry.get('vol_vrt'))
+                z = data_.meta['geometry']['vol_tra'][0]    
+                vol_z.append(z)
                     
             vol_z0 = min(vol_z)
             
@@ -615,12 +624,37 @@ class Pipe:
             vol_z0 = self._buffer_['vol_z0']
 
         # Index of the current dataset:
-        vol_z = data.geometry.get('vol_vrt')    
+        vol_z = data.meta['geometry']['vol_tra'][0] 
         offset = numpy.int32(flexData.mm2pixel(vol_z - vol_z0, data.geometry))
         
+        # Merge volumes with some ramp:
         index = numpy.arange(0, data.data.shape[0]) + offset
+        ramp = 20
+        
+        jj = 0
+        for ii in index[:ramp]:
+            b = (jj+1) / ramp
+            a = min([(total[ii].sum() != 0), 1 - b])            
+            total[ii] = (data.data[jj] * b + total[ii] * a) / (a + b)
+            
+            jj += 1
+        
+        for ii in index[ramp:-ramp]:
+            total[ii] = data.data[jj]
+            
+            jj += 1
+        
+        sz = index.size
+        for ii in index[-ramp:]:
+            b = (sz - jj) / ramp
+            a = min([(total[ii].sum() != 0), 1 - b])            
+            total[ii] = (data.data[jj] * b + total[ii] * a) / (a + b)
+            
+            jj += 1
+        
+            #numpy.max([data.data, total[index]], 0)
                 
-        total[index] = numpy.max([data.data, total[index]], 0)
+        #total[index] = numpy.max([data.data, total[index]], 0)
         
         #flexUtil.display_slice(total, dim = 1,title = 'vol merge')  
 
@@ -641,15 +675,18 @@ class Pipe:
            self._data_que_ = [data,]
            self._buffer_['total'] = None
 
-           gc.collect()
+        gc.collect()
     
     def _sirt_(self, data, condition, count):        
                 
         shape = data.data.shape
         vol = numpy.zeros([shape[0]+40, shape[2], shape[2]], dtype = 'float32')
         
-        options = {'bounds':[0, 10], 'l2_update':False, 'block_number':100, 'index':'random'}
-        flexProject.SIRT(data.data, vol, data.meta['geometry'], iterations = 5, options = options)
+        options = {'bounds':[0, 10], 'l2_update':False, 'block_number':50, 'index':'random'}
+        
+        iterations = condition.get('iterations')
+        
+        flexProject.SIRT(data.data, vol, data.meta['geometry'], iterations = iterations, options = options)
                 
         # Replace projection data with volume data:
         data.data = vol 
@@ -666,14 +703,31 @@ class Pipe:
         
     def _fdk_(self, data, condition, count):        
         
-        vol = flexProject.init_volume(data.data)
+        
 
         # Apply a small ramp to reduce filtering aretfacts:        
         ramp = condition.get('ramp')
         if ramp:
             data.data = flexCompute.apply_edge_ramp(data.data, ramp)
         
+        shape = condition.get('shape')
+        
+        if shape:
+            vol = numpy.zeros(shape, dtype = 'float32')
+            
+        else:
+            vol = flexProject.init_volume(data.data)
+        
         flexProject.FDK(data.data, vol, data.meta['geometry'])
+        
+        em = condition.get('em')
+        sirt = condition.get('sirt')
+        
+        if em:
+            flexProject.EM(data.data, vol, data.meta['geometry'], iterations = em, options = {'block_number':20})
+            
+        if sirt:
+            flexProject.SIRT(data.data, vol, data.meta['geometry'], iterations = sirt, options = {'bounds' :[0,10], 'block_number':20})
 
         # Replace projection data with volume data:
         data.data = vol
@@ -731,14 +785,15 @@ class Pipe:
         dim = condition.get('dim')
         proj = condition.get('projection')
         
-        if not dim: 
+        if dim is None: 
             dim = 1
             
-            # DIsplay single dimension:
-            if proj:
-                flexUtil.display_projection(data.data, dim = dim, title = 'Projection. Block #%u'%count)
-            else:
-                flexUtil.display_slice(data.data, dim = dim, title = 'Mid slice. Block #%u'%count)    
+        # DIsplay single dimension:
+        if proj:
+            flexUtil.display_projection(data.data, dim = dim, title = 'Projection. Block #%u'%count)
+                                        
+        else:
+            flexUtil.display_slice(data.data, dim = dim, title = 'Mid slice. Block #%u'%count)    
                 
     def _memmap_(self, data, condition, count):
         """
