@@ -51,7 +51,27 @@ def _backproject_block_(projections, volume, proj_geom, vol_geom, algorithm = 'B
             raise ValueError('Unknown ASTRA algorithm type.')
         
         if (operation == '*'):
+            
              volume *= volume_
+            
+             #flexUtil.display_slice(volume, dim = 0, title = 'worm')
+            
+             # This is really slow but needed in case of overlap for EM: 
+             volume_ *= 0
+             astra.data3d.delete(sin_id)
+             sin_id = astra.data3d.link('-sino', proj_geom, projections * 0 + 1)
+             
+             asex.accumulate_BP(projector_id, vol_id, sin_id)
+             
+             #flexUtil.display_slice(volume_, dim = 0, title = 'norm')
+             
+             volume_[volume_ < 0.01] = 0.01
+             
+             volume /= volume_
+             
+             #flexUtil.display_slice(volume, dim = 0, title = 'rorm')
+             
+             
         elif (operation == '/'):
              volume_[volume_ < 1e-10] = numpy.inf
              volume /= volume_
@@ -369,7 +389,7 @@ def _em_step_(projections, prj_weight, volume, geometry, options):
             block = projections
             
         else:
-            block = (projections[:, index, :])
+            block = (projections[:, index, :]).copy()
         
         # Reserve memory for a forward projection (keep it separate):
         synth = numpy.ascontiguousarray(numpy.zeros_like(block))
@@ -452,6 +472,15 @@ def SIRT_tiled(projections, volume, geometries, iterations, options = {'poisson_
     
     # Initialize L2:
     l2 = []
+    
+    # In tiled reconstructions position of the volume should be the same for each tile:
+    geometries_ = []
+    for geom in geometries:
+        geom_ = geom.copy()
+        
+        # Compute average volume shift:
+        geom_['vol_tra'] = numpy.mean([g['vol_tra'] for g in geometries], 0)
+        geometries_.append(geom_)
 
     print('Doing SIRT`y things...')
     
@@ -462,7 +491,7 @@ def SIRT_tiled(projections, volume, geometries, iterations, options = {'poisson_
         l2_ = 0
         for ii, proj in enumerate(projections):
             
-            geom = geometries[ii]
+            geom = geometries_[ii]
 
             #m = (geom['src2obj'] + geom['det2obj']) / geom['src2obj']
             prj_weight = 1 / (proj.shape[1] * (geom['img_pixel']) ** 4 * max(volume.shape))
@@ -547,6 +576,15 @@ def EM_tiled(projections, volume, geometries, iterations, options = {'poisson_we
 
     # Initialize L2:
     l2 = []
+    
+    # In tiled reconstructions position of the volume should be the same for each tile:
+    geometries_ = []
+    for geom in geometries:
+        geom_ = geom.copy()
+        
+        # Compute average volume shift:
+        geom_['vol_tra'] = numpy.mean([g['vol_tra'] for g in geometries], 0)
+        geometries_.append(geom_)
 
     print('Em Emm Emmmm...')
     
@@ -557,16 +595,16 @@ def EM_tiled(projections, volume, geometries, iterations, options = {'poisson_we
         #l2_ = 0
         for ii, proj in enumerate(projections):
             
-            geom = geometries[ii]
+            geom = geometries_[ii]
 
             # Update volume:
             l2_ = _em_step_(proj, 1, volume, geom, options)
             
-        l2.append(l2_)
-                    
         # Preview
         if options.get('preview'):
             flexUtil.display_slice(volume, dim = 0)
+            
+        l2.append(l2_)
             
         flexUtil.progress_bar((ii+1) / iterations)
         
