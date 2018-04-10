@@ -61,7 +61,7 @@ def read_raw(path, name, skip = 1, sample = [1, 1], x_roi = [], y_roi = [], dtyp
         y_roi ([y0, y1]): vertical range
         dtype (str or numpy.dtype): data type to return
         memmap (str): if provided, return a disk mapped array to save RAM
-        thetas (array): if provided, will exclude array elements that correspond to missing files
+        index (array): if provided, will output an index array corresponding to succefully read files.
         
     Returns:
         numpy.array : 3D array with the first dimension representing the image index
