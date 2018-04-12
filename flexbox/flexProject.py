@@ -299,10 +299,10 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
         
         # Copy data to a block or simply pass a pointer to data itself if block is one.
         if (mode == 'sequential') & (block_number == 1):
-            block = projections
+            block = projections.copy()
             
         else:
-            block = (projections[:, index, :])
+            block = (projections[:, index, :]).copy()
             block = numpy.ascontiguousarray(block)
                 
         if ctf is None:
