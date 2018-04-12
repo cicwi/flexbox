@@ -73,7 +73,7 @@ def _backproject_block_(projections, volume, proj_geom, vol_geom, algorithm = 'B
              
              
         elif (operation == '/'):
-             volume_[volume_ < 1e-10] = numpy.inf
+             volume_[volume_ < 1e-3] = numpy.inf
              volume /= volume_
              
     except:
@@ -156,7 +156,6 @@ def backproject(projections, volume, geometry, algorithm = 'BP3D_CUDA', operatio
             
             # Backproject:    
             _backproject_block_(block, volume, proj_geom, vol_geom, algorithm, operation)  
-
             
 def forwardproject(projections, volume, geometry, operation = '+'):
     """
@@ -232,11 +231,7 @@ def FDK(projections, volume, geometry):
     # Make sure array is contiguous (if not memmap):
     flexUtil.progress_bar(0)    
     
-    # Yeeey!
-    backproject(projections, volume, geometry, 'FDK_CUDA')
-    
-    # Apply correct scaling:
-    volume /= geometry['img_pixel']**4     
+    backproject(projections / geometry['img_pixel']**4, volume, geometry, 'FDK_CUDA')
     
     flexUtil.progress_bar(1) 
     

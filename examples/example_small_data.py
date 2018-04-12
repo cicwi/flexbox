@@ -53,6 +53,7 @@ flex.util.display_slice(vol, title = 'SIRT')
 #%% Short implementation:
     
 proj, meta = flex.compute.process_flex('/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/', options = {'bin':1, 'memmap': None}) 
+
 vol = flex.project.init_volume(proj)
 flex.project.FDK(proj, vol, meta['geometry'])
 flex.util.display_slice(vol, dim = 0, title = 'FDK')    

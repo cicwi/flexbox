@@ -924,6 +924,10 @@ def process_flex(path, options = {'bin':1, 'memmap': None}):
     bins = options.get('bin')
     memmap = options.get('memmap')
     
+    skip = options.get('skip')
+    if skip is None:
+        skip = bins
+    
     # Read:    
     print('Reading...')
     
@@ -931,7 +935,7 @@ def process_flex(path, options = {'bin':1, 'memmap': None}):
     flat = flexData.read_raw(path, 'io', sample = [bins, bins])    
     
     index = []
-    proj = flexData.read_raw(path, 'scan_', skip = bins, sample = [bins, bins], memmap = memmap, index = index)
+    proj = flexData.read_raw(path, 'scan_', skip = skip, sample = [bins, bins], memmap = memmap, index = index)
 
     meta = flexData.read_log(path, 'flexray', bins = bins)   
             
@@ -950,10 +954,12 @@ def process_flex(path, options = {'bin':1, 'memmap': None}):
     
     # Here we will also check whether all files were read and if not - modify thetas accordingly:
     index = numpy.array(index)
-    index //= bins
+    index //= skip
     
-    if proj.shape[1] != index.size:
-        print('Seemes like some files were corrupted. We will try to correct thetas accordingly.')
+    if (index[-1] + 1) != index.size:
+        print(index.size)
+        print(index[-1] + 1)
+        print('Seemes like some files were corrupted or missing. We will try to correct thetas accordingly.')
         
         thetas = numpy.linspace(meta['geometry']['theta_min'], meta['geometry']['theta_max'], index[-1]+1)
         thetas = thetas[index]
