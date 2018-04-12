@@ -11,5 +11,8 @@ conda install scikit-image
 conda install matplotlib
 conda install imageio
 
+git clone https://github.com/cicwi/flexbox
+cd flexbox
+
 pip install -e .
 ```

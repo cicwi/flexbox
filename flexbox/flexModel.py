@@ -40,6 +40,15 @@ def phantom(shape, mode = 'bubble', parameters = [10, 1, 1]):
         vol = ((xx[:, None, None]*e)**2 + (yy[None, :, None]/e)**2 + zz[None, None, :]**2)
         vol = numpy.array((vol < r0), dtype = 'float32') 
         
+    elif mode == 'cylinder':
+        r0 = parameters[0] ** 2
+        h = parameters[1]
+
+        vol = ((zz[None, None, :])**2 + (yy[None, :, None])**2)
+        vol = numpy.array(vol < r0, dtype = 'float32') 
+        
+        vol = vol * (numpy.abs(xx[:, None, None]) < h)
+        
     elif mode == 'checkers':
         return _checkers_(shape, parameters[0])
         
