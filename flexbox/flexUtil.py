@@ -160,7 +160,7 @@ def progress_bar(progress):
         
         print(txt, end = " ") 
 
-def plot(x, y = None, semilogy = False, title = None):
+def plot(x, y = None, semilogy = False, title = None, legend = None):
     
     if y is None:
         y = x
@@ -177,6 +177,9 @@ def plot(x, y = None, semilogy = False, title = None):
     
     if title:
         plt.title(title)
+    
+    if legend:
+        plt.legend(legend)
         
     plt.show()    
 

@@ -192,7 +192,7 @@ def forwardproject(projections, volume, geometry, operation = '+'):
 
             # Forwardproject:
             _forwardproject_block_(block, volume, proj_geom, vol_geom, operation)  
-            
+                     
 def init_volume(projections):
     """
     Initialize a standard volume array.
@@ -327,7 +327,7 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
         # Take into account Poisson:
         if options.get('poisson_weight'):
             # Some formula representing the effect of photon starvation...
-            #block *= numpy.sqrt(numpy.exp(-projections[:, index, :]))    
+            #block *= numpy.sqrt(numpy.exp(-projections[:, index, :]))               
             block *= numpy.exp(-projections[:, index, :])
             
         block *= prj_weight * block_number

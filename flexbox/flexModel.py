@@ -10,6 +10,8 @@ This module includes a few routines useful for modeling polychromatic X-ray CT d
 """
 import numpy
 from . import flexSpectrum
+from . import flexUtil
+from . import flexProject
 
 def phantom(shape, mode = 'bubble', parameters = [10, 1, 1]):
     """
@@ -39,6 +41,14 @@ def phantom(shape, mode = 'bubble', parameters = [10, 1, 1]):
 
         vol = ((xx[:, None, None]*e)**2 + (yy[None, :, None]/e)**2 + zz[None, None, :]**2)
         vol = numpy.array((vol < r0), dtype = 'float32') 
+        
+    elif mode == 'box':
+        x = parameters[0]
+        y = parameters[1]
+        z = parameters[2]
+
+        vol = (abs(xx[:, None, None]) < x) * (abs(yy[None, :, None]) < y) * (abs(zz[None, None, :]) < z)
+        vol = numpy.array(vol, dtype = 'float32')     
         
     elif mode == 'cylinder':
         r0 = parameters[0] ** 2
@@ -240,3 +250,93 @@ def apply_noise(image, mode = 'poisson', parameter = 1):
     else: 
         raise ValueError('Me not recognize the mode! Use normal or poisson!')
 
+def effective_spectrum(kv = 90, filtr = {'material':'Cu', 'density':8, 'thickness':0.1}, detector = {'material':'Si', 'density':5, 'thickness':1}):
+    """
+    Generate an effective specturm of a CT scanner.
+    """            
+    energy = numpy.linspace(10, 90, 9)
+    
+    # Tube:
+    spectrum = flexSpectrum.bremsstrahlung(energy, kv) 
+    
+    # Filter:
+    if filtr:
+        spectrum *= flexSpectrum.total_transmission(energy, filtr['material'], rho = filtr['density'], thickness = filtr['thickness'])
+    
+    # Detector:
+    if detector:    
+        spectrum *= flexSpectrum.scintillator_efficiency(energy, detector['material'], rho = detector['density'], thickness = detector['thickness'])
+    
+    # Normalize:
+    spectrum /= (energy*spectrum).sum()
+    
+    return energy, spectrum
+    
+def spectralize(proj, kv = 90, n_phot = 1e8, specimen = {'material':'Al', 'density': 2.7}, filtr = {'material':'Cu', 'density':8, 'thickness':0.1}, detector = {'material':'Si', 'density':5, 'thickness':1}):
+    """
+    Simulate spectral data.
+    """
+    
+    # Generate spectrum:
+    energy, spectrum = effective_spectrum(kv, filtr, detector)
+    
+    # Get the material refraction index:
+    mu = flexSpectrum.linear_attenuation(energy, specimen['material'], specimen['density'])
+     
+    # Display:
+    flexUtil.plot(energy, spectrum, title = 'Spectrum') 
+    flexUtil.plot(energy, mu, title = 'Linear attenuation') 
+        
+    # Simulate intensity images:
+    counts = numpy.zeros_like(proj)
+        
+    for ii in range(len(energy)):
+        
+        # Monochromatic component:
+        monochrome = spectrum[ii] * numpy.exp(-proj * mu[ii])
+        monochrome = apply_noise(monochrome, 'poisson', n_phot) / n_phot    
+        
+        # Detector response is assumed to be proportional to E
+        counts += energy[ii] * monochrome
+    
+    return counts
+
+def forward_spectral(vol, proj, geometry, materials, energy, spectrum, n_phot = 1e8):
+    """
+    Simulate spectral data using labeled volume.
+    """
+    
+    max_label = int(vol.max())
+    
+    if max_label != len(materials): raise ValueError('Number of materials is not the same as the number of labels in the volume!')
+
+    # Normalize spectrum:
+    spectrum /= (spectrum * energy).sum()
+    
+    # Simulate intensity images:
+    lab_proj = []
+    for jj in range(max_label):
+        
+        # Forward project:    
+        proj_j = numpy.zeros_like(proj)
+        vol_j = numpy.float32(vol == (jj+1))
+        flexProject.forwardproject(proj_j, vol_j, geometry)
+        
+        lab_proj.append(proj_j)
+        
+    for ii in range(len(energy)):
+        
+        # Monochromatic components:
+        monochrome = numpy.ones_like(proj)
+        
+        for jj in range(max_label):
+            
+            mu = flexSpectrum.linear_attenuation(energy, materials[jj]['material'], materials[jj]['density'])
+    
+            monochrome *= numpy.exp(-lab_proj[jj] * mu[ii])
+            
+        monochrome *= spectrum[ii]
+        monochrome = apply_noise(monochrome, 'poisson', n_phot) / n_phot    
+
+        # Detector response is assumed to be proportional to E
+        proj += energy[ii] * monochrome
