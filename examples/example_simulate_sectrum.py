@@ -11,8 +11,8 @@ import numpy
 #%% Create volume and forward project:
     
 # Initialize images:    
-vol = numpy.zeros([1, 512, 512], dtype = 'float32')
-proj = numpy.zeros([1, 361, 512], dtype = 'float32')
+vol = numpy.zeros([1, 128, 128], dtype = 'float32')
+proj = numpy.zeros([1, 128, 128], dtype = 'float32')
 
 # Define a simple projection geometry:
 src2obj = 100     # mm
@@ -22,7 +22,7 @@ det_pixel = 0.2   # mm (100 micron)
 geometry = flex.data.create_geometry(src2obj, det2obj, det_pixel, [0, 360], 361)
 
 # Create phantom (150 micron wide, 15 micron wall thickness):
-vol = flex.model.phantom(vol.shape, 'ball', [150,1])     
+vol = flex.model.phantom(vol.shape, 'box', [25,25,25])     
 flex.project.forwardproject(proj, vol, geometry)
 
 #%% Simulate spectrum:
@@ -64,7 +64,7 @@ for ii in range(len(energy)):
 
 # Simulate detector blurring:
 ctf = flex.model.get_ctf(counts.shape[::2], 'gaussian', [det_pixel, det_pixel])
-counts = flex.model.apply_ctf(counts, ctf)        
+#counts = flex.model.apply_ctf(counts, ctf)        
 
 # Display:
 flex.util.display_slice(counts, title = 'Modelled sinogram') 
