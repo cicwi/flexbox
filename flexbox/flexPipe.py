@@ -133,23 +133,23 @@ class Pipe:
 
         # This one maps function names to callback funtions:
         self._callback_dictionary_ = {'shift': self._shift_, 'scan_flexray': self._scan_flexray_, 'read_flexray': self._read_flexray_, 
-        'read_all_meta': self._read_all_meta_, 'process_flex': self._process_flex_, 'shape': self._shape_, 'crop': self._crop_,'ramp': self._ramp_,
+        'read_all_meta': self._read_all_meta_, 'process_flex': self._process_flex_, 'shape': self._shape_, 'bin':self._bin_, 'crop': self._crop_,'ramp': self._ramp_,
         'merge_detectors': self._merge_detectors_, 'merge_volume': self._merge_volume_, 'find_rotation': self._find_rotation_, 'em':self._em_,
         'fdk': self._fdk_,'tiled_sirt': self._tiled_sirt_, 'sirt': self._sirt_, 'write_flexray': self._write_flexray_, 'cast2int':self._cast2int_, 
         'display':self._display_, 'memmap':self._memmap_, 'read_volume': self._read_volume_, 'equalize_intensity': self._equalize_intensity_,
-        'equalize_resolution': self._equalize_resolution_, 'register_volumes': self._register_volumes_}
+        'equalize_resolution': self._equalize_resolution_, 'register_volumes': self._register_volumes_, 'bh_correction':self._bh_correction_}
         
         # This one maps function names to condition that have to be used with them:
         self._condition_dictionary_ = {'shift':['shift'], 'scan_flexray': ['path'], 'read_flexray': ['sampling'], 'register_volumes':[], 
         'read_all_meta':[],'tiled_sirt': [], 'process_flex': [], 'shape': ['shape'],'sirt': [], 'find_rotation':[], 'equalize_intensity':[],
         'merge_detectors': ['memmap'], 'merge_volume':['memmap'], 'fdk': [], 'write_flexray': ['folder'], 'crop': ['crop'],'em':[],'ramp':['width'],
-        'cast2int':['bounds'], 'display':[], 'memmap':['path'], 'read_volume': [], 'equalize_resolution':[]}
+        'cast2int':['bounds'], 'display':[], 'memmap':['path'], 'read_volume': [], 'equalize_resolution':[], 'bin':['sample'], 'bh_correction':['compound','path', 'density']}
         
         # This one maps function names to function types. There are three: batch, standby, coincident
-        self._type_dictionary_ = {'shift':'batch', 'scan_flexray': 'batch', 'read_flexray': 'batch', 'find_rotation':'batch',
+        self._type_dictionary_ = {'shift':'batch', 'scan_flexray': 'batch', 'read_flexray': 'batch', 'find_rotation':'batch', 'bin':'batch',
         'read_all_meta':'concurrent', 'process_flex': 'batch', 'shape': 'batch', 'sirt':'batch','equalize_resolution':'batch','ramp':'batch',
         'merge_detectors': 'standby', 'merge_volume':'standby', 'tiled_sirt': 'standby', 'fdk': 'batch', 'write_flexray': 'batch', 'crop': 'batch', 
-        'cast2int':'batch', 'display':'batch', 'memmap':'batch', 'read_volume': 'batch','register_volumes':'batch', 'em':'batch',
+        'cast2int':'batch', 'display':'batch', 'memmap':'batch', 'read_volume': 'batch','register_volumes':'batch', 'em':'batch', 'bh_correction':'batch',
         'equalize_intensity':'batch'}
         
         # If pipe is provided - copy it's action que!
@@ -495,7 +495,7 @@ class Pipe:
         data.type = 'projections'
         
         gc.collect()
-                
+        
     def _process_flex_(self, data, condition, count):
         """
         Process data.
@@ -513,7 +513,18 @@ class Pipe:
         
         # SOmetimes there are non of inf pixels...
         data.data[~numpy.isfinite(data.data)] = 0
-            
+    
+    def _bh_correction_(self, data, condition, count):
+        """
+        Correct for beam hardening.
+        """
+        
+        path = condition.get('path')
+        compound = condition.get('compound')
+        density = condition.get('density')
+        
+        data.data = flexCompute.quivalent_density(data.data, data.meta['geometry'], energy, spectrum, compound = compound, density = density)
+                
     def _merge_detectors_(self, data, condition, count):
         """
         Merge datasets one by one. 
@@ -617,6 +628,15 @@ class Pipe:
                 total = numpy.zeros(tot_shape, dtype=data.data.dtype)     
                 
             self._buffer_['total'] = total    
+            
+            # Compute overlap:
+            b0 = flexData.detector_bounds(data.shape, self._data_que_[0].meta['geometry'])
+            b1 = flexData.detector_bounds(data.shape, self._data_que_[1].meta['geometry'])
+            
+            overlap = min(b0['vrt'][1] - b1['vrt'][0], b0['vrt'][0] - b1['vrt'][1])
+            overlap = flexData.mm2pixel(overlap, data.geometry)
+            
+            self._buffer_['overlap'] = overlap
 
         else:
             
@@ -627,9 +647,17 @@ class Pipe:
         vol_z = data.meta['geometry']['vol_tra'][0] 
         offset = numpy.int32(flexData.mm2pixel(vol_z - vol_z0, data.geometry))
         
+        # Crop data based on the size of the overlap:
+        ramp = 50
+        
+        if overlap > ramp:
+            dif = (overlap - ramp)
+            print('Ramp of %u pixels is applied in volume merge. Will crop %u pixels before merge to reduce the risk of artifacts.' % (ramp, dif))
+            
+            data.data = data.data[dif:-dif,:,:]
+                    
         # Merge volumes with some ramp:
         index = numpy.arange(0, data.data.shape[0]) + offset
-        ramp = 50
         
         jj = 0
         for ii in index[:ramp]:
@@ -790,6 +818,17 @@ class Pipe:
                     # Pad case:
                     data.data = flexUtil.pad(data.data, dim, crop, symmetric = True)
 
+    def _bin_(self, data, condition, count):
+        """
+        Crop the data.
+        """
+        print('Applying crop...')
+        
+        dim = condition.get('dim')
+         
+        if crop[dim] != 0:
+            data.data = flexUtil.bin(data.data, dim)
+                
     def _crop_(self, data, condition, count):
         """
         Crop the data.

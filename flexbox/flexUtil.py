@@ -84,7 +84,19 @@ def pad(array, dim, width, symmetric = False):
             padr[dim] = int(width)
         
     return numpy.pad(array, ((padl[0], padr[0]), (padl[1], padr[1]), (padl[2], padr[2])), mode = 'constant')  
-                
+ 
+def bin(array, dim = 0):
+    """
+    Simple binning of the data:
+    """               
+    if dim == 0:
+        return array[:-1:2,:,:] + array[1::2,:,:]
+    
+    elif dim == 1:
+        return array[:, :-1:2, :] + array[:, 1::2, :]
+    
+    elif dim == 2:
+        return array[:, :, :-1:2] + array[:, :, 1::2]
     
 def crop(array, dim, width, symmetric = False):
     """
