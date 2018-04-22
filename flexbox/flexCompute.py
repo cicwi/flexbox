@@ -1217,34 +1217,57 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     ''' 
     
     from . import flexSpectrum
+    import random
 
     # Find the shape of the object:                                                    
-    segmentation = numpy.zeros_like(volume)
-        
     if threshold:
         segmentation = numpy.array(volume > threshold, 'float32')
     else:
-        max_ = numpy.percentile(volume, 99)
-        segmentation = numpy.array(volume > (max_/2), 'float32')
+        #max_ = numpy.percentile(volume, 99)
+        #segmentation = numpy.array(volume > (max_/2), 'float32')
+        segmentation = binary_threshold(volume, mode = 'otsu')    
+        segmentation = numpy.array(segmentation > 0, 'float32')
     
     # Crop:    
-    height = segmentation.shape[0]   
-    w = 5
-    segmentation = segmentation[height//2-w:height//2 + w, : ,:]    
-    projections_ = projections[height//2-w:height//2 + w, : ,:]
-        
-    flexUtil.display_slice(segmentation, title = 'segmentation')
-    
-    # Reprojected length:   
-    length = numpy.zeros_like(projections)
-    
-    length = length[height//2-w:height//2 + w, : ,:]    
+    #height = segmentation.shape[0]   
+    #w = 15
+
+    #length = length[height//2-w:height//2 + w, : ,:]    
     
     # Forward project the shape:                  
     print('Calculating the attenuation length.')  
+    
+    length = numpy.zeros_like(projections)    
     length = numpy.ascontiguousarray(length)
-
     flexProject.forwardproject(length, segmentation, geometry)
+    
+    # Make 1D:
+    intensity = numpy.exp(-projections[length > 0] .ravel())
+    length = length[length > 0] .ravel()
+    
+    lmax = length.max()
+    lmin = length.min()    
+    
+    print('Maximum reprojected length:', lmax)
+    print('Minimum reprojected length:', lmin)
+    
+    print('Selecting a random subset of points.')  
+    
+    # Rare the sample to avoid slow times:
+    index = random.sample(numpy.arange(length.size), 1e5)
+    length = length[index]
+    intensity = intensity[index]
+    
+    print('Computing the intensity-length transfer function.')
+    
+    # Bin number for lengthes:
+    bin_n = 128
+    bins = numpy.linspace(lmin, lmax, bin_n)
+    
+    # Sample the midslice:
+    #segmentation = segmentation[height//2-w:height//2 + w, : ,:]    
+    #projections_ = projections[height//2-w:height//2 + w, : ,:]
+    
     
     #import flexModel
     #ctf = flexModel.get_ctf(length.shape[::2], 'gaussian', [1, 1])
@@ -1252,47 +1275,26 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
             
     # TODO: Some cropping might be needed to avoid artefacts at the edges
     
-    flexUtil.display_slice(length, title = 'length sinogram')
-    flexUtil.display_slice(projections_, title = 'apparent sinogram')
-    
-    length = length.ravel()
-    intensity = numpy.exp(-projections_.ravel())
-    
-    #To avoid having a gap between length = 0 and length != 0:
-    intensity = intensity[length > 0]    
-    length = length[length > 0]    
-    
-    lmax = length.max()
-    lmin = length.min()
-    
-    print('Maximum reprojected length:', lmax)
-    print('Minimum reprojected length:', lmin)
-    
-    print('Number of intensity-length pairs:', length.size)
-    
-    print('Computing the intensity-length transfer function.')
+    #flexUtil.display_slice(length, title = 'length sinogram')
+    #flexUtil.display_slice(projections_, title = 'apparent sinogram')
         
-    # Bin number for lengthes:
-    bin_n = 128
-    bins = numpy.linspace(lmin, lmax, bin_n)
-    
     # Rebin:
     idx  = numpy.digitize(length, bins)
     
     # Rebin length and intensity:        
-    length_0 = bins + (bins[1]-bins[0]) / 2
+    length_0 = bins + (bins[1] - bins[0]) / 2
     intensity_0 = [numpy.median(intensity[idx==k]) for k in range(bin_n)]
 
     intensity_0 = numpy.array(intensity_0)
     length_0 = numpy.array(length_0)
     
     # Get rid of tales:
-    length_0 = length_0[5:-5]    
-    intensity_0 = intensity_0[5:-5]    
+    length_0 = length_0[:-5]    
+    intensity_0 = intensity_0[:-5]    
     
     # Enforce zero-one values:
-    length_0 = numpy.insert(length_0, 0, 0)
-    intensity_0 = numpy.insert(intensity_0, 0, 1)
+    #length_0 = numpy.insert(length_0, 0, 0)
+    #intensity_0 = numpy.insert(intensity_0, 0, 1)
     
     #flexUtil.plot(length_0, intensity_0, title = 'Length v.s. Intensity')
         
@@ -1306,7 +1308,7 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     exp_matrix = numpy.exp(-numpy.outer(length_0, mu))
     
     # Initial guess of the spectrum:
-    spec = flexSpectrum.bremsstrahlung(energy, 90) 
+    spec = flexSpectrum.bremsstrahlung(energy, 100) 
     spec *= flexSpectrum.scintillator_efficiency(energy, 'Si', rho = 5, thickness = 0.5)
     spec *= flexSpectrum.total_transmission(energy, 'H2O', 1, 1)
     spec *= energy
@@ -1320,17 +1322,30 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     
     spec0 = spec.copy()
     
+    # SIRT type:
+    '''
     for ii in range(iterations): 
         frw = exp_matrix.dot(spec)
 
-        epsilon = frw.max() / 10
+        #epsilon = frw.max() / 10
+        #frw[frw < epsilon] = epsilon
+
+        spec = spec * exp_matrix.T.dot(intensity_0 / frw) / norm_sum
+    '''    
+    # EM type:
+    #'''
+    for ii in range(iterations): 
+        frw = exp_matrix.dot(spec)
+
+        epsilon = frw.max() / 100
         frw[frw < epsilon] = epsilon
 
         spec = spec * exp_matrix.T.dot(intensity_0 / frw) / norm_sum
 
         # Make sure that the total count of spec is 1
         #spec = spec / spec.sum()
-
+    #'''
+    
     print('Spectrum computed.')
     
     # synthetic intensity for a check:
@@ -1344,9 +1359,9 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     import matplotlib.pyplot as plt
     
     plt.figure()
-    plt.semilogy(length, intensity, 'b.', lw=4, alpha=.8)
-    plt.semilogy(length_0, intensity_0, 'g:')
-    plt.semilogy(length_0, _intensity, 'r-', lw=4)
+    plt.semilogy(length[::200], intensity[::200], 'b.', lw=4, alpha=.8)
+    plt.semilogy(length_0, intensity_0, 'g--')
+    plt.semilogy(length_0, _intensity, 'r-', lw=3, alpha=.6)
     
     #plt.scatter(length[::100], -numpy.log(intensity[::100]), color='b', alpha=.2, s=4)
     plt.axis('tight')
