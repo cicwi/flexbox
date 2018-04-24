@@ -143,7 +143,7 @@ class Pipe:
         self._condition_dictionary_ = {'shift':['shift'], 'scan_flexray': ['path'], 'read_flexray': ['sampling'], 'register_volumes':[], 
         'read_all_meta':[],'tiled_sirt': [], 'process_flex': [], 'shape': ['shape'],'sirt': [], 'find_rotation':[], 'equalize_intensity':[],
         'merge_detectors': ['memmap'], 'merge_volume':['memmap'], 'fdk': [], 'write_flexray': ['folder'], 'crop': ['crop'],'em':[],'ramp':['width'],
-        'cast2int':['bounds'], 'display':[], 'memmap':['path'], 'read_volume': [], 'equalize_resolution':[], 'bin':['sample'], 'bh_correction':['compound','path', 'density']}
+        'cast2int':['bounds'], 'display':[], 'memmap':['path'], 'read_volume': [], 'equalize_resolution':[], 'bin':[], 'bh_correction':['compound','path', 'density']}
         
         # This one maps function names to function types. There are three: batch, standby, coincident
         self._type_dictionary_ = {'shift':'batch', 'scan_flexray': 'batch', 'read_flexray': 'batch', 'find_rotation':'batch', 'bin':'batch',
@@ -523,7 +523,8 @@ class Pipe:
         compound = condition.get('compound')
         density = condition.get('density')
         
-        data.data = flexCompute.quivalent_density(data.data, data.meta['geometry'], energy, spectrum, compound = compound, density = density)
+        energy, spectrum = numpy.loadtxt(path + 'spectrum.txt')
+        data.data = flexCompute.equivalent_density(data.data, data.meta['geometry'], energy, spectrum, compound = compound, density = density)
                 
     def _merge_detectors_(self, data, condition, count):
         """
@@ -630,28 +631,45 @@ class Pipe:
             self._buffer_['total'] = total    
             
             # Compute overlap:
-            b0 = flexData.detector_bounds(data.shape, self._data_que_[0].meta['geometry'])
-            b1 = flexData.detector_bounds(data.shape, self._data_que_[1].meta['geometry'])
+            b0 = flexData.detector_bounds(data.data.shape, self._data_que_[0].meta['geometry'])
+            b1 = flexData.detector_bounds(data.data.shape, self._data_que_[1].meta['geometry'])
             
-            overlap = min(b0['vrt'][1] - b1['vrt'][0], b0['vrt'][0] - b1['vrt'][1])
-            overlap = flexData.mm2pixel(overlap, data.geometry)
+            print('***')
+            print(self._data_que_[0].meta['geometry']['det_vrt'])
+            print('***')
+            print(self._data_que_[1].meta['geometry']['det_vrt'])
+            print('***')
+            print(self._data_que_[2].meta['geometry']['det_vrt'])
+            print('***')
+            
+            overlap = min(abs(b0['vrt'][1] - b1['vrt'][0]), abs(b0['vrt'][0] - b1['vrt'][1]))
+            
+            # This is in volume (img_pixel):
+            print('overlap', overlap)
+            print('det_pixel', data.geometry['det_pixel'])
+            overlap = int(overlap / data.geometry['det_pixel'] / 2)
             
             self._buffer_['overlap'] = overlap
+            
+            print('Overlap between tiles is:', overlap, 'pixels')
 
         else:
             
             total = self._buffer_['total']
             vol_z0 = self._buffer_['vol_z0']
-
+            overlap = self._buffer_['overlap']
+            
         # Index of the current dataset:
         vol_z = data.meta['geometry']['vol_tra'][0] 
         offset = numpy.int32(flexData.mm2pixel(vol_z - vol_z0, data.geometry))
         
         # Crop data based on the size of the overlap:
-        ramp = 50
+        ramp = data.data.shape[0] // 20
         
-        if overlap > ramp:
-            dif = (overlap - ramp)
+        dif = int(overlap /2 - ramp)- 1 # to be safe....
+        
+        if dif > 0:
+            
             print('Ramp of %u pixels is applied in volume merge. Will crop %u pixels before merge to reduce the risk of artifacts.' % (ramp, dif))
             
             data.data = data.data[dif:-dif,:,:]
@@ -702,6 +720,7 @@ class Pipe:
            # Replace all datasteams with the result: 
            self._data_que_ = [data,]
            self._buffer_['total'] = None
+           self._buffer_ = None
 
         gc.collect()
     
@@ -812,11 +831,11 @@ class Pipe:
                 crop = shape[dim] - myshape[dim]
                 if crop < 0:
                     # Crop case:
-                    data.data = flexUtil.crop(data.data, dim, -crop, symmetric = True)
+                    data.data = flexData.crop(data.data, dim, -crop, symmetric = True)
             
                 elif crop > 0:
                     # Pad case:
-                    data.data = flexUtil.pad(data.data, dim, crop, symmetric = True)
+                    data.data = flexData.pad(data.data, dim, crop, symmetric = True)
 
     def _bin_(self, data, condition, count):
         """
@@ -824,11 +843,8 @@ class Pipe:
         """
         print('Applying crop...')
         
-        dim = condition.get('dim')
-         
-        if crop[dim] != 0:
-            data.data = flexUtil.bin(data.data, dim)
-                
+        data.data = flexData.bin(data.data)
+            
     def _crop_(self, data, condition, count):
         """
         Crop the data.
@@ -839,7 +855,7 @@ class Pipe:
          
         for dim in range(3):
             if crop[dim] != 0:
-                data.data = flexUtil.crop(data.data, dim, crop[dim], symmetric = True)                   
+                data.data = flexData.crop(data.data, dim, crop[dim], symmetric = True)                   
                     
     def _cast2int_(self, data, condition, count):
         """

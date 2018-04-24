@@ -344,18 +344,27 @@ def pad(array, dim, width, symmetric = False):
         
     return numpy.pad(array, ((padl[0], padr[0]), (padl[1], padr[1]), (padl[2], padr[2])), mode = 'constant')  
  
-def bin(array, dim = 0):
+def bin(array):
     """
     Simple binning of the data:
-    """               
-    if dim == 0:
-        return array[:-1:2,:,:] + array[1::2,:,:]
+    """         
+    # First apply division by 8:
+    array //= 8
     
-    elif dim == 1:
-        return array[:, :-1:2, :] + array[:, 1::2, :]
-    
-    elif dim == 2:
-        return array[:, :, :-1:2] + array[:, :, 1::2]
+    # Try to avoid memory overflow here:
+    for ii in range(array.shape[0]):
+        sl = flexUtil.anyslice(array, ii, 0)
+        
+        x = array[sl]
+        array[sl][:-1:2,:] += x[1::2,:]
+        array[sl][:,:-1:2] += x[:,1::2]
+        
+    for ii in range(array.shape[2]):
+        sl = flexUtil.anyslice(array, ii, 2)
+        
+        array[sl][:-1:2,:-1:2] += array[sl][1::2,:-1:2]    
+        
+    return array[:-1:2, :-1:2, :-1:2]
     
 def crop(array, dim, width, symmetric = False, geometry = None):
     """
@@ -389,7 +398,9 @@ def crop(array, dim, width, symmetric = False, geometry = None):
         h = (widthl - widthr)
         array = array[:,:,widthl:-widthr]   
     
-    if geometry: shift_geometry(geometry, -h, -v)
+    print(h)
+    if geometry: shift_geometry(geometry, h/2, v/2)
+    #if geometry: shift_geometry(geometry, -h/2, -v/2)
     
     return array
     
@@ -427,8 +438,8 @@ def shift_geometry(geometry, hrz, vrt):
     """
     Apply geometry shift in pixels.
     """    
-    hrz = hrz / geometry['det_pixel']
-    vrt = vrt / geometry['det_pixel']
+    hrz = hrz * geometry['det_pixel']
+    vrt = vrt * geometry['det_pixel']
     
     geometry['det_hrz'] += hrz
     geometry['det_vrt'] += vrt

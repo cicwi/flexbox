@@ -1217,7 +1217,7 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     ''' 
     
     from . import flexSpectrum
-    import random
+    #import random
 
     # Find the shape of the object:                                                    
     if threshold:
@@ -1254,9 +1254,9 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     print('Selecting a random subset of points.')  
     
     # Rare the sample to avoid slow times:
-    index = random.sample(numpy.arange(length.size), 1e5)
-    length = length[index]
-    intensity = intensity[index]
+    #index = random.sample(range(length.size), 1000000)
+    #length = length[index]
+    #intensity = intensity[index]
     
     print('Computing the intensity-length transfer function.')
     
@@ -1284,17 +1284,20 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     # Rebin length and intensity:        
     length_0 = bins + (bins[1] - bins[0]) / 2
     intensity_0 = [numpy.median(intensity[idx==k]) for k in range(bin_n)]
-
+    
+    # In case some bins are empty:
     intensity_0 = numpy.array(intensity_0)
     length_0 = numpy.array(length_0)
-    
+    length_0 = length_0[numpy.isfinite(intensity_0)]
+    intensity_0 = intensity_0[numpy.isfinite(intensity_0)]
+
     # Get rid of tales:
-    length_0 = length_0[:-5]    
-    intensity_0 = intensity_0[:-5]    
+    length_0 = length_0[5:-5]    
+    intensity_0 = intensity_0[5:-5]    
     
     # Enforce zero-one values:
-    #length_0 = numpy.insert(length_0, 0, 0)
-    #intensity_0 = numpy.insert(intensity_0, 0, 1)
+    length_0 = numpy.insert(length_0, 0, 0)
+    intensity_0 = numpy.insert(intensity_0, 0, 1)
     
     #flexUtil.plot(length_0, intensity_0, title = 'Length v.s. Intensity')
         
@@ -1319,21 +1322,27 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     #spec[-1] = 0
     
     norm_sum = exp_matrix.sum(0)
-    
     spec0 = spec.copy()
+    #spec *= 0
     
     # SIRT type:
+    import matplotlib.pyplot as plt
     '''
+    w = exp_matrix.T.dot(exp_matrix.dot(spec + 1))
+    w[w < 0.01] = numpy.inf
+    
+    print(w)
+    
     for ii in range(iterations): 
         frw = exp_matrix.dot(spec)
-
-        #epsilon = frw.max() / 10
-        #frw[frw < epsilon] = epsilon
-
-        spec = spec * exp_matrix.T.dot(intensity_0 / frw) / norm_sum
+        
+        grad = exp_matrix.T.dot(intensity_0 - frw)
+        spec = spec + grad / w
+        spec[spec < 0] = 0
+        
     '''    
     # EM type:
-    #'''
+    
     for ii in range(iterations): 
         frw = exp_matrix.dot(spec)
 
@@ -1344,7 +1353,7 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
 
         # Make sure that the total count of spec is 1
         #spec = spec / spec.sum()
-    #'''
+    
     
     print('Spectrum computed.')
     
@@ -1356,7 +1365,7 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     #flexUtil.plot(_intensity, title = 'synth_counts')
     
     # Display:    
-    import matplotlib.pyplot as plt
+   
     
     plt.figure()
     plt.semilogy(length[::200], intensity[::200], 'b.', lw=4, alpha=.8)
