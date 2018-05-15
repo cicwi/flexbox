@@ -11,7 +11,6 @@ This module some wrappers around ASTRA to make lives of people slightly less hor
 
 import numpy
 import astra
-import astra.experimental as asex 
 import sys
 import matplotlib.pyplot as plt
 import random
@@ -26,6 +25,10 @@ def _backproject_block_(projections, volume, proj_geom, vol_geom, algorithm = 'B
     """
     Use this internal function to compute backprojection of a single block of data.
     """           
+    
+    # Unfortunately need to hide the experimental ASTRA
+    import astra.experimental as asex 
+    
     try:
         
         if (operation == '+'):
@@ -88,6 +91,9 @@ def _forwardproject_block_(projections, volume, proj_geom, vol_geom, operation =
     """
     Use this internal function to compute backprojection of a single block of data.
     """           
+    # Unfortunately need to hide the experimental ASTRA
+    import astra.experimental as asex 
+    
     try:
         
         if (operation == '+'):
@@ -333,7 +339,7 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
         block *= prj_weight * block_number
         
         # Apply ramp to reduce boundary effects:
-        block = flexUtil.apply_edge_ramp(block, 20, extend = False)
+        block = flexUtil.apply_edge_ramp(block, 10, extend = False)
         
         # L2 norm (use the last block to update):
         if options.get('l2_update'):

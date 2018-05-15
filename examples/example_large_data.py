@@ -4,20 +4,22 @@
 Test flexData module.
 """
 #%%
-import flexData
-import flexProject
-import flexUtil
+import flexbox as flex
 import numpy
+import sys
 
 #%% Read
 
-path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/'
+if len(sys.argv) == 2:
+    path = sys.argv[1]
+else:
+    path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/'
 
-dark = flexData.read_raw(path, 'di')
-flat = flexData.read_raw(path, 'io')    
-proj = flexData.read_raw(path, 'scan_', memmap = '/export/scratch3/kostenko/flexbox_swap/swap.prj')
+dark = flex.data.read_raw(path, 'di')
+flat = flex.data.read_raw(path, 'io')    
+proj = flex.data.read_raw(path, 'scan_', memmap = '/export/scratch3/kostenko/flexbox_swap/swap.prj')
 
-meta = flexData.read_log(path, 'flexray')   
+meta = flex.data.read_log(path, 'flexray')   
  
 #%% Prepro:
     
@@ -29,23 +31,23 @@ proj /= (flat.mean(0) - dark)
 numpy.log(proj, out = proj)
 proj *= -1
 
-proj = flexData.raw2astra(proj)    
+proj = flex.data.raw2astra(proj)    
 
-flexUtil.display_slice(proj)
+flex.util.display_slice(proj)
 
 #%% Recon
 
 vol = numpy.zeros([50, 2000, 2000], dtype = 'float32')
 
-flexProject.FDK(proj, vol, meta['geometry'])
+flex.project.FDK(proj, vol, meta['geometry'])
 
-flexUtil.display_slice(vol)
+flex.util.display_slice(vol)
 
 #%% SIRT
 
 vol = numpy.ones([50, 2000, 2000], dtype = 'float32')
 
 options = {'block_number':10, 'index':'sequential'}
-flexProject.SIRT(proj, vol, meta['geometry'], iterations = 5)
+flex.project.SIRT(proj, vol, meta['geometry'], iterations = 5)
 
-flexUtil.display_slice(vol, title = 'SIRT')
+flex.util.display_slice(vol, title = 'SIRT')

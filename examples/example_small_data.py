@@ -51,8 +51,8 @@ flex.project.SIRT(proj, vol, meta['geometry'], iterations = 1, options = options
 flex.util.display_slice(vol, title = 'SIRT')
 
 #%% Short implementation:
-    
-proj, meta = flex.compute.process_flex('/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/', options = {'bin':1, 'memmap': None}) 
+path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/'    
+proj, meta = flex.compute.process_flex(path) 
 
 vol = flex.project.init_volume(proj)
 flex.project.FDK(proj, vol, meta['geometry'])

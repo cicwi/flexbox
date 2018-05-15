@@ -22,20 +22,20 @@ src2obj = 100     # mm
 det2obj = 100     # mm   
 det_pixel = 0.001 / x # mm (1 micron)
 
-geometry = flex.data.create_geometry(src2obj, det2obj, det_pixel, [0, 360], 361)
+geometry = flex.data.create_geometry(src2obj, det2obj, det_pixel, [0, 360])
 
 # Create phantom (150 micron wide, 15 micron wall thickness):
-vol = flex.model.phantom(vol.shape, 'bubble', [150*x, 30*x])     
-vol += flex.model.phantom(vol.shape, 'bubble', [10*x, 3*x])     
+vol = flex.model.phantom(vol.shape, 'bubble', [150*x, 30*x,1])     
+vol += flex.model.phantom(vol.shape, 'bubble', [10*x, 3*x,1])     
 flex.project.forwardproject(proj, vol, geometry)
 
 #%%
 # Get the material refraction index:
-c = flexSpectrum.find_nist_name('Calcium Carbonate')    
+c = flex.spectrum.find_nist_name('Calcium Carbonate')    
 rho = c['density'] / 10
 
 energy = 30 # KeV
-n = flexSpectrum.material_refraction(energy, 'CaCO3', rho)
+n = flex.spectrum.material_refraction(energy, 'CaCO3', rho)
 
 #%% Proper Fresnel propagation for phase-contrast:
    
@@ -90,11 +90,3 @@ options = {'bounds':[0, 10], 'l2_update':True, 'block_number':2, 'index':'sequen
 flex.project.SIRT(-numpy.log(proj_i), vol_rec, geometry, iterations = 10, options = options)
 
 flex.util.display_slice(vol_rec, title = 'SIRT')
-
-#%% EM
-vol_rec = numpy.ones_like(vol)    
-options = {'l2_update':True, 'block_number':2, 'index':'sequential', 'ctf':dual_ctf}
-flex.project.EM(-numpy.log(proj_i), vol_rec, geometry, iterations = 1, options = options)
-flex.util.display_slice(vol_rec, title = 'EM')
-
-

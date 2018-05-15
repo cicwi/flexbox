@@ -349,7 +349,10 @@ def bin(array):
     Simple binning of the data:
     """         
     # First apply division by 8:
-    array //= 8
+    if array.dtype.kind == 'i':    
+        array //= 8
+    else:
+        array /= 8
     
     # Try to avoid memory overflow here:
     for ii in range(array.shape[0]):
@@ -481,7 +484,7 @@ def astra_vol_geom(geometry, vol_shape, slice_first = None, slice_last = None, s
         shape = vol_shape
         offset = 0     
         
-    vol_geom = astra.create_vol_geom(shape[1], shape[2], shape[0], 
+    vol_geom = astra.creators.create_vol_geom(shape[1], shape[2], shape[0], 
               -size[2]/2, size[2]/2, -size[1]/2, size[1]/2, 
               -size[0]/2 + offset, size[0]/2 + offset)
         
@@ -516,7 +519,7 @@ def astra_proj_geom(geometry, data_shape, index = None, sample = [1, 1]):
         
         thetas = thetas[index]
        
-    proj_geom = astra.create_proj_geom('cone', det_pixel[1], det_pixel[0], det_count_z, det_count_x, thetas, src2obj, det2obj)
+    proj_geom = astra.creators.create_proj_geom('cone', det_pixel[1], det_pixel[0], det_count_z, det_count_x, thetas, src2obj, det2obj)
     
     proj_geom = astra.functions.geom_2vec(proj_geom)
       
@@ -597,7 +600,7 @@ def astra_proj_geom(geometry, data_shape, index = None, sample = [1, 1]):
     
     return proj_geom   
 
-def create_geometry(src2obj, det2obj, det_pixel, theta_range, theta_count):
+def create_geometry(src2obj, det2obj, det_pixel, theta_range):
     """
     Initialize an empty geometry record.
     """

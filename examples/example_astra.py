@@ -9,12 +9,12 @@ import numpy
 import astra
 import sys
 
-#%% Read
-if len(sys.argv) == 1:
-    print("USAGE: python", sys.argv[0], "<path to data>")
-    exit(-1)
+#%% Read data:
     
-path = sys.argv[1]
+if len(sys.argv) == 2:
+    path = sys.argv[1]
+else:
+    path = '/export/scratch3/kostenko/Fast_Data/salt_no_filter'
 
 dark = flex.data.read_raw(path, 'di')
 flat = flex.data.read_raw(path, 'io')    

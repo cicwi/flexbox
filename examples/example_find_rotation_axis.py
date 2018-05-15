@@ -5,12 +5,15 @@ Test flex.data module.
 """
 #%%
 import flexbox as flex
-
+import sys
 import numpy
 
 #%% Read
+if len(sys.argv) == 2:
+    path = sys.argv[1]
+else:
+    path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/'
 
-path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/'
 dark = flex.data.read_raw(path, 'di')
 flat = flex.data.read_raw(path, 'io')    
 proj = flex.data.read_raw(path, 'scan_')
@@ -33,7 +36,7 @@ guess = flex.compute.optimize_rotation_center(proj, meta['geometry'], guess = 0,
 #%% Recon
 meta['geometry']['axs_hrz'] = guess
 
-vol = flex.project.inint_volume(proj)
+vol = flex.project.init_volume(proj)
 flex.project.FDK(proj, vol, meta['geometry'])
 
 flex.util.display_slice(vol, bounds = [], title = 'FDK')

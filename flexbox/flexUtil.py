@@ -35,8 +35,10 @@ def apply_edge_ramp(data, width, extend = True):
         data = numpy.pad(data, ((w0, w0), (0,0),(w1, w1)), mode = 'linear_ramp', end_values = 0)
         
     else:
-        data[-width:, :, :] *= numpy.linspace(1, 0, width)[:, None, None]
-        data[:width, :, :] *= numpy.linspace(0, 1, width)[:, None, None]
+        if data.shape[0] > width*2:
+            data[-width:, :, :] *= numpy.linspace(1, 0, width)[:, None, None]
+            data[:width, :, :] *= numpy.linspace(0, 1, width)[:, None, None]
+
         data[:, :, -width:] *= numpy.linspace(1, 0, width)[None, None, :]
         data[:, :, :width] *= numpy.linspace(0, 1, width)[None, None, :]
         
@@ -125,7 +127,7 @@ def plot(x, y = None, semilogy = False, title = None, legend = None):
         
     plt.show()    
 
-def display_slice(data, index = None, dim = 0, bounds = None, title = None):
+def display_slice(data, index = None, dim = 0, bounds = None, title = None, cmap = 'gray'):
     
     # Just in case squeeze:
     data = numpy.squeeze(data)
@@ -144,9 +146,9 @@ def display_slice(data, index = None, dim = 0, bounds = None, title = None):
         
     plt.figure()
     if bounds:
-        plt.imshow(img, vmin = bounds[0], vmax = bounds[1])
+        plt.imshow(img, vmin = bounds[0], vmax = bounds[1], cmap = cmap)
     else:
-        plt.imshow(img)
+        plt.imshow(img, cmap = cmap)
         
     plt.colorbar()
     
@@ -155,16 +157,16 @@ def display_slice(data, index = None, dim = 0, bounds = None, title = None):
         
     plt.show()    
 
-def display_projection(data, dim = 1, bounds = None, title = None):
+def display_projection(data, dim = 1, bounds = None, title = None, cmap = 'gray'):
     
     img = data.sum(dim)
     
     plt.figure()
     
     if bounds:
-        plt.imshow(img, vmin = bounds[0], vmax = bounds[1])
+        plt.imshow(img, vmin = bounds[0], vmax = bounds[1], cmap = cmap)
     else:
-        plt.imshow(img)
+        plt.imshow(img, cmap = cmap)
         
     plt.colorbar()
     
@@ -173,11 +175,11 @@ def display_projection(data, dim = 1, bounds = None, title = None):
     
     plt.show()
     
-def display_max_projection(data, dim = 0, title = None):
+def display_max_projection(data, dim = 0, title = None, cmap = 'gray'):
     
     img = data.max(dim)
     
-    plt.imshow(img)
+    plt.imshow(img, cmap = cmap)
     plt.colorbar()
     
     if title:
@@ -185,11 +187,11 @@ def display_max_projection(data, dim = 0, title = None):
         
     plt.show()
         
-def display_min_projection(data, dim = 0, title = None):
+def display_min_projection(data, dim = 0, title = None, cmap = 'gray'):
     
     img = data.min(dim)
     
-    plt.imshow(img)
+    plt.imshow(img, cmap = cmap)
     plt.colorbar()
     
     if title:

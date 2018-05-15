@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Simulate spectral data with Poisson noise
+Use Al dummy to callibrate density.
 """
 #%%
 import flexbox as flex
-
 import numpy
 
 #%% Read
 
 #path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/'
 path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_1mm_brass/'
+
 dark = flex.data.read_raw(path, 'di')
 flat = flex.data.read_raw(path, 'io')    
 proj = flex.data.read_raw(path, 'scan_')
@@ -24,26 +24,24 @@ proj = (proj - dark) / (flat.mean(0) - dark)
 proj = -numpy.log(proj)
 proj = flex.data.raw2astra(proj)    
 
-proj = flexCompute.subtract_air(proj)
+proj = flex.compute.subtract_air(proj)
 
 flex.util.display_slice(proj, title = 'Sinogram')
 
 #%% Reconstruct:
     
-vol = flexProject.init_volume(proj)
-flexProject.FDK(proj, vol, meta['geometry'])
+vol = flex.project.init_volume(proj)
+flex.project.FDK(proj, vol, meta['geometry'])
 
-vol /= meta['geometry']['img_pixel'] ** 4
 flex.util.display_slice(vol, title = 'Uncorrected FDK')
     
 energy, spectrum = flex.spectrum.calibrate_spectrum(proj, vol,  meta['geometry'], compound = 'Al', density = 2.7, n_bin = 21, iterations = 1000)   
-
-#energy, spectrum = flexSpectrum.calibrate_spectrum_nobin(proj, vol,  meta['geometry'], compound = 'Al', density = 2.7, n_bin = 11, iterations = 100)   
 
 # Save:
 numpy.savetxt(path + 'spectrum.txt', [energy, spectrum]) 
 
 #%% Test:
+
 proj_ = flex.spectrum.equivalent_density(proj,  meta['geometry'], energy, spectrum, compound = 'Al', density = 2.7) 
 
 vol = flex.project.init_volume(proj)
@@ -53,7 +51,7 @@ vol /= meta['geometry']['img_pixel'] ** 4
 
 flex.util.display_slice(vol, title = 'Corrected FDK')
 
-flexCompute.histogram(vol)
+flex.compute.histogram(vol)
 
 #%% Test 2: different data
 
@@ -74,7 +72,7 @@ proj = flex.spectrum.equivalent_density(proj,  meta['geometry'], energy, spectru
 
 flex.util.display_slice(proj, title = 'After')
 
-vol = flexProject.init_volume(proj)
+vol = flex.project.init_volume(proj)
 #flexProject.FDK(proj, vol, meta['geometry'])
 flex.project.SIRT(proj, vol, meta['geometry'], iterations = 10)
 
