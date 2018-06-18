@@ -108,7 +108,7 @@ def plot(x, y = None, semilogy = False, title = None, legend = None):
     
     if y is None:
         y = x
-        x = numpy.arange(x.size)
+        x = numpy.arange(numpy.size(x))
     
     x = numpy.squeeze(x)
     y = numpy.squeeze(y)

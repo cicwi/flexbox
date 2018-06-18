@@ -13,7 +13,7 @@ from . import flexSpectrum
 from . import flexUtil
 from . import flexProject
 
-def phantom(shape, mode = 'bubble', parameters = [10, 1, 1]):
+def phantom(shape, mode = 'bubble', parameters = [10, 1, 1], centre = [0,0,0]):
     """
     Create a phantom image.
     
@@ -23,9 +23,9 @@ def phantom(shape, mode = 'bubble', parameters = [10, 1, 1]):
         parameters (list or float): for the bubble - [outer radius, wall thickness, squeeze], ball - radius, squeeze
     """    
     
-    xx = numpy.arange(0, shape[0]) - shape[0] / 2
-    yy = numpy.arange(0, shape[1]) - shape[1] / 2
-    zz = numpy.arange(0, shape[2]) - shape[2] / 2
+    xx = numpy.arange(0, shape[0]) - shape[0] / 2 - centre[0]
+    yy = numpy.arange(0, shape[1]) - shape[1] / 2 - centre[1]
+    zz = numpy.arange(0, shape[2]) - shape[2] / 2 - centre[2]
     
     if mode == 'bubble':
         r0 = (parameters[0] - parameters[1])**2

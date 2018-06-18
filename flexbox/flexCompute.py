@@ -98,8 +98,8 @@ def _find_best_flip_(fixed, moving, Rfix, Tfix, Rmov, Tmov, use_CG = True, sampl
     moving = moving[::sample, ::sample, ::sample].copy()
     
     # Apply filters to smooth erors somewhat:
-    fixed = ndimage.filters.gaussian_filter(fixed, sigma = 1)
-    moving = ndimage.filters.gaussian_filter(moving, sigma = 1)
+    fixed = ndimage.filters.gaussian_filter(fixed, sigma = 2)
+    moving = ndimage.filters.gaussian_filter(moving, sigma = 2)
     
     #flexUtil.display_projection(fixed - moving, title = 'before flips')
      
@@ -381,6 +381,8 @@ def register_volumes(fixed, moving, subsamp = 2, use_moments = True, use_CG = Tr
     Returns:
         
     '''    
+    import skimage.filters
+    
     if fixed.shape != moving.shape: raise IndexError('Fixed and moving volumes have different dimensions:', fixed.shape, moving.shape)
     
     print('Using image moments to register volumes.')
@@ -398,8 +400,14 @@ def register_volumes(fixed, moving, subsamp = 2, use_moments = True, use_CG = Tr
     #moving_0 /= fact_mov
     
     if threshold:
-        fixed_0 = binary_threshold(fixed_0, threshold)
-        moving_0 = binary_threshold(moving_0, threshold)
+        # We use Otsu here instead of binary_threshold to make sure that the same 
+        # threshold is applied to both images:
+        #fixed_0 = binary_threshold(fixed_0, threshold)
+        #moving_0 = binary_threshold(moving_0, threshold)
+        
+        threshold = skimage.filters.threshold_otsu(numpy.appned(fixed_0[::2, ::2, ::2], moving_0[::2, ::2, ::2]))
+        fixed_0 = fixed_0[fixed_0 < threshold]
+        moving_0 = moving_0[moving_0 < threshold]
         
     L2 = norm(fixed_0 - moving_0)
     print('L2 norm before registration: %0.2e' % L2)
@@ -415,38 +423,34 @@ def register_volumes(fixed, moving, subsamp = 2, use_moments = True, use_CG = Tr
                
         # Total rotation and shift:
         #Rtot = numpy.dot(Rmov, Rfix.T)
-        Rtot = Rmov.T.dot(Rfix)
+        #Rtot = Rmov.T.dot(Rfix)
 
-        Ttot = Tfix - numpy.dot(Tmov, Rtot)
+        #Ttot = Tfix - numpy.dot(Tmov, Rtot)
+        
+        Rtot, Ttot = _find_best_flip_(fixed_0, moving_0, Rfix, Tfix, Rmov, Tmov, use_CG = use_flips)
         
         flexUtil.progress_bar(1)
     
     else:
         # Initial transform:
-        if Rtot is None:
-            Rtot = numpy.zeros([3,3])
-            Rtot[0, 0] = 1
-            Rtot[1, 1] = 1
-            Rtot[2, 2] = 1
-            
-            Ttot = numpy.zeros(3)
+        Rtot = numpy.zeros([3,3])
+        Rtot[0, 0] = 1
+        Rtot[1, 1] = 1
+        Rtot[2, 2] = 1
+        
+        Ttot = numpy.zeros(3)
             
     # Refine registration using ITK optimization:
-    if not use_CG:
-        
-        # Solve ambiguity with directions of intensity axes:    
-        Rtot, Ttot = _find_best_flip_(fixed_0, moving_0, Rfix, Tfix, Rmov, Tmov, use_CG = use_flips)
-    
-    else:
+    if use_CG:
         
         print('Running ITK optimization.')
         
-        Rtot = Rmov.T.dot(Rfix)
+        #Rtot = Rmov.T.dot(Rfix)
         #Rtot = Rmov.dot(Rfix.T)
-        Ttot = Tfix - Tmov.dot(Rtot)
+        #Ttot = Tfix - Tmov.dot(Rtot)
 
         # Find flip with or without CG:
-        Rtot, Ttot = _find_best_flip_(fixed_0, moving_0, Rfix, Tfix, Rmov, Tmov, use_CG = use_flips)
+        #Rtot, Ttot = _find_best_flip_(fixed_0, moving_0, Rfix, Tfix, Rmov, Tmov, use_CG = use_flips)
         
         # Show the result of moments registration:
         L2 = norm(fixed_0 - affine(moving_0.copy(), Rtot, Ttot))
@@ -471,11 +475,11 @@ def transform_to_geometry(R, T, geom):
     # Translate to flex geometry:
     geom = geom.copy()
     geom['vol_rot'] = transforms3d.euler.mat2euler(R.T, axes = 'sxyz')
-    geom['vol_tra'] = numpy.array(geom['vol_tra']) - numpy.dot(T, R.T)[[0, 2, 1]] * geom['det_pixel']
+    geom['vol_tra'] = numpy.array(geom['vol_tra']) - numpy.dot(T, R.T)[[0,2,1]] * geom['img_pixel']
     
     return geom
     
-def register_astra_geometry(proj_fix, proj_mov, geom_fix, geom_mov):
+def register_astra_geometry(proj_fix, proj_mov, geom_fix, geom_mov, subsamp = 1):
     """
     Compute a rigid transformation that makes sure that two reconstruction volumes are alligned.
     Args:
@@ -501,7 +505,7 @@ def register_astra_geometry(proj_fix, proj_mov, geom_fix, geom_mov):
     #flexUtil.display_projection(vol1 - vol2, title = 'Before registration')
     
     # Find transformation between two volumes:
-    R, T = register_volumes(vol1, vol2, subsamp = 1, use_moments=True, use_CG=True)
+    R, T = register_volumes(vol1, vol2, subsamp = subsamp, use_moments=True, use_CG=True)
     
     #flexUtil.display_projection(vol1 - affine(vol2, R, T), title = 'Diff. After registration')
     #flexUtil.display_projection(vol1, title = 'V1. After registration')
@@ -509,7 +513,7 @@ def register_astra_geometry(proj_fix, proj_mov, geom_fix, geom_mov):
     
     return R, T
 
-def scale(data, factor):
+def scale(data, factor, order = 1):
     '''
     Scales the volume via interpolation.
     '''
@@ -517,7 +521,7 @@ def scale(data, factor):
     
     flexUtil.progress_bar(0)  
     
-    data = ndimage.interpolation.zoom(data, factor)
+    data = ndimage.interpolation.zoom(data, factor, order = order)
     
     flexUtil.progress_bar(1)      
     
@@ -544,7 +548,7 @@ def rotate(data, angle, axis = 0):
         
     return data
         
-def translate(data, shift):
+def translate(data, shift, order = 1):
     """
     Apply a 3D tranlation.
     """
@@ -553,7 +557,7 @@ def translate(data, shift):
 
     flexUtil.progress_bar(0)  
     
-    ndimage.interpolation.shift(data, shift, data)
+    ndimage.interpolation.shift(data, shift, output = data, order = order)
         
     flexUtil.progress_bar(1)   
 
@@ -684,38 +688,37 @@ def moment2(data, power, dim, centered = True):
     else:
         return numpy.sum(x[None, None, :] * data)
         
-    def interpolate_holes(self, mask2d, kernel = [3,3,3]):
+def interpolate_holes(data, mask2d, kernel = [2,2]):
         '''
         Fill in the holes, for instance, saturated pixels.
         
         Args:
             mask2d: holes are zeros. Mask is the same for all projections.
         '''
+        mask_norm = ndimage.filters.gaussian_filter(numpy.float32(mask2d), sigma = kernel)
+        #flexUtil.display_slice(mask_norm, title = 'mask_norm')
         
+        sh = data.shape[1]
         flexUtil.progress_bar(0)        
-        for ii, block in enumerate(self._parent.data):    
-                    
+        for ii in range(sh):    
+                
+            data[:, ii, :] = data[:, ii, :] * mask2d           
+
             # Compute the filler:
-            tmp = ndimage.filters.gaussian_filter(mask2d, sigma = kernel)        
-            tmp[tmp > 0] **= -1
+            tmp = ndimage.filters.gaussian_filter(data[:, ii, :], sigma = kernel) / mask_norm      
+                                                  
+            #flexUtil.display_slice(tmp, title = 'tmp')
 
             # Apply filler:                 
-            block = block * mask2d[:, None, :]           
-            block += ndimage.filters.gaussian_filter(block, sigma = kernel) * (~mask2d[:, None, :])
+            data[:, ii, :][~mask2d] = tmp[~mask2d]
             
-            self._parent.data[ii] = block   
-
             # Show progress:
-            flexUtil.progress_bar((ii+1) / self._parent.data.block_number)
-            
-        self._parent.meta.history.add_record('process.interpolate_holes(mask2d, kernel)', kernel)
+            flexUtil.progress_bar((ii+1) / sh)
 
 def residual_rings(data, kernel=[3, 1, 3]):
     '''
     Apply correction by computing outlayers .
     '''
-    #import ndimage
-    
     # Compute mean image of intensity variations that are < 5x5 pixels
     print('Our best agents are working on the case of the Residual Rings. This can take years if the kernel size is too big!')
 
@@ -941,6 +944,9 @@ def process_flex(path, options = {'bin':1, 'memmap': None}):
             
     # Prepro:
     print('Processing...')
+    if dark.ndim > 2:
+        dark = dark.mean(0)
+        
     proj -= dark
     proj /= (flat.mean(0) - dark)
         
@@ -948,7 +954,7 @@ def process_flex(path, options = {'bin':1, 'memmap': None}):
     proj *= -1
     
     # Fix nans and infs after log:
-    proj[~numpy.isfinite(proj)] = 0
+    proj[~numpy.isfinite(proj)] = 10
     
     proj = flexData.raw2astra(proj)    
     

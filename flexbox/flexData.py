@@ -322,8 +322,25 @@ def read_meta(file_path):
     
     # Parse TOML string:
     return toml.load(file_path)
+    
+def shape_alike(vol1, vol2):
+    '''
+    Make sure two arrays have the same shape:
+    '''
+    d_shape = numpy.array(vol2.shape)
+    d_shape -= vol1.shape
 
-def pad(array, dim, width, symmetric = False):
+    for dim in [0,1,2]:
+        
+        pp = d_shape[dim]
+        if pp > 0:
+            vol1 = pad(vol1, dim, pp, symmetric = True, mode = 'linear_ramp')
+        if pp < 0:
+            vol2 = pad(vol2, dim, -pp, symmetric = True, mode = 'linear_ramp')
+        
+    return vol1, vol2    
+
+def pad(array, dim, width, symmetric = False, mode = 'constant'):
     """
     Pad an array along the given dimension.
     """
@@ -342,14 +359,14 @@ def pad(array, dim, width, symmetric = False):
         else:
             padr[dim] = int(width)
         
-    return numpy.pad(array, ((padl[0], padr[0]), (padl[1], padr[1]), (padl[2], padr[2])), mode = 'constant')  
+    return numpy.pad(array, ((padl[0], padr[0]), (padl[1], padr[1]), (padl[2], padr[2])), mode = mode)  
  
 def bin(array):
     """
     Simple binning of the data:
-    """         
+    """           
     # First apply division by 8:
-    if array.dtype.kind == 'i':    
+    if (array.dtype.kind == 'i') | (array.dtype.kind == 'u'):    
         array //= 8
     else:
         array /= 8
@@ -452,7 +469,7 @@ def shift_geometry(geometry, hrz, vrt):
     geometry['vol_tra'][2] += hrz / m
     geometry['vol_tra'][0] += vrt / m    
     
-def astra_vol_geom(geometry, vol_shape, slice_first = None, slice_last = None, sample = [1, 1]):
+def astra_vol_geom(geometry, vol_shape, slice_first = None, slice_last = None):
     '''
     Initialize volume geometry.        
     '''
@@ -463,7 +480,8 @@ def astra_vol_geom(geometry, vol_shape, slice_first = None, slice_last = None, s
     #mag = (geometry['det2obj'] + geometry['src2obj']) / geometry['src2obj']
     
     # Use 'img_pixel' to override the voxel size:
-    voxel = numpy.array([sample[0], sample[1], sample[1]]) * geometry['img_pixel']
+    sample =  geometry.get('anisotropy')   
+    voxel = numpy.array([sample[0], sample[1], sample[2]]) * geometry['img_pixel']
 
     size = vol_shape * voxel
 
@@ -490,7 +508,7 @@ def astra_vol_geom(geometry, vol_shape, slice_first = None, slice_last = None, s
         
     return vol_geom   
 
-def astra_proj_geom(geometry, data_shape, index = None, sample = [1, 1]):
+def astra_proj_geom(geometry, data_shape, index = None):
     """
     Generate the vector that describes positions of the source and detector.
     """
@@ -499,6 +517,7 @@ def astra_proj_geom(geometry, data_shape, index = None, sample = [1, 1]):
     det_count_z = data_shape[0]
     theta_count = data_shape[1]
 
+    sample =  geometry.get('sample')   
     det_pixel = geometry['det_pixel'] * numpy.array(sample)
     
     src2obj = geometry['src2obj']
@@ -607,8 +626,8 @@ def create_geometry(src2obj, det2obj, det_pixel, theta_range):
     
     # Create an empty dictionary:
     geometry = {'det_pixel':det_pixel, 'det_hrz':0., 'det_vrt':0., 'det_mag':0., 
-    'src_hrz':0., 'src_vrt':0., 'src_mag':0., 'axs_hrz':0., 'det_rot':0., 
-    'vol_rot':[0. ,0. ,0.], 'vol_hrz':0., 'vol_tra':[0., 0., 0.], 'vol_mag':0.,
+    'src_hrz':0., 'src_vrt':0., 'src_mag':0., 'axs_hrz':0., 'det_rot':0., 'anisotropy':[1,1,1],
+    'vol_rot':[0. ,0. ,0.], 'vol_hrz':0., 'vol_tra':[0., 0., 0.], 'vol_mag':0., 'sample':[1,1],
     'src2obj': src2obj, 'det2obj':det2obj, 'unit':'millimetre', 'type':'flex', 'binning': 1}
     
     geometry['src2det'] = geometry.get('src2obj') + geometry.get('det2obj')
@@ -821,7 +840,7 @@ def _parse_keywords_(path, file_mask, dictionary, separator = ':'):
         log_file = os.path.join(path, log_file[0])
 
     # Create an empty geometry dictionary:
-    geometry = create_geometry(0, 0, 0, [0, 360], 0)
+    geometry = create_geometry(0, 0, 0, [0, 360])
 
     settings = {}
     description = {}

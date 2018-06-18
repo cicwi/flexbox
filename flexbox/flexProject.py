@@ -14,12 +14,46 @@ import astra
 import sys
 import matplotlib.pyplot as plt
 import random
+import scipy 
 
 from . import flexUtil
 from . import flexData
 from . import flexModel
 
 ''' * Methods * '''
+
+def misfit(res, scl, deg):
+    
+    c = -numpy.size(res) * (scipy.special.gammaln((deg + 1) / 2) - 
+            scipy.special.gammaln(deg / 2) - .5 * numpy.log(numpy.pi*scl*deg))
+    
+    return c + .5 * (deg + 1) * sum(numpy.log(1 + numpy.conj(res) * res / (scl * deg)))
+    
+def st(res, scl, deg):   
+    
+    grad = numpy.float32(scl * (deg + 1) * res / (scl * deg + numpy.conj(res) * res))
+    
+    return grad
+    
+def studentst(res, deg = 1, scl = None):
+    
+    # nD to 1D:
+    shape = res.shape
+    res = res.ravel()
+    
+    # Optimize scale:
+    if scl is None:    
+        fun = lambda x: misfit(res[::70], x, deg)
+        scl = scipy.optimize.fmin(fun, x0 = [1,], disp = 0)[0]
+        #scl = numpy.percentile(numpy.abs(res), 90)
+        #print(scl)
+        #print('Scale in Student`s-T is:', scl)
+        
+    # Evaluate:    
+    grad = numpy.reshape(st(res, scl, deg), shape)
+    
+    return grad
+
 
 def _backproject_block_(projections, volume, proj_geom, vol_geom, algorithm = 'BP3D_CUDA', operation = '+'):
     """
@@ -38,6 +72,9 @@ def _backproject_block_(projections, volume, proj_geom, vol_geom, algorithm = 'B
             volume_ = numpy.zeros_like(volume)
             
         else: ValueError('Unknown operation type!')
+        
+        if (operation == '-'):
+            projections *= -1
                     
         sin_id = astra.data3d.link('-sino', proj_geom, projections)        
         vol_id = astra.data3d.link('-vol', vol_geom, volume_)    
@@ -53,7 +90,10 @@ def _backproject_block_(projections, volume, proj_geom, vol_geom, algorithm = 'B
         else:
             raise ValueError('Unknown ASTRA algorithm type.')
         
-        if (operation == '*'):
+        if (operation == '-'):
+            projections *= -1            
+            
+        elif (operation == '*'):
             
              volume *= volume_
             
@@ -99,6 +139,9 @@ def _forwardproject_block_(projections, volume, proj_geom, vol_geom, operation =
         if (operation == '+'):
             projections_ = projections
             
+        elif (operation == '-'):
+            projections_ = -projections
+            
         elif (operation == '*') | (operation == '/'):
             projections_ = numpy.zeros_like(projections)
             
@@ -113,10 +156,13 @@ def _forwardproject_block_(projections, volume, proj_geom, vol_geom, operation =
         
         if (operation == '*'):
              projections *= projections_
+             
         elif (operation == '/'):
-            
              projections_[projections_ < 1e-10] = numpy.inf        
              projections /= projections_
+             
+        elif (operation == '-'):
+            projections[:] = -projections_[:]
              
     except:
         print("ASTRA error:", sys.exc_info())
@@ -124,7 +170,7 @@ def _forwardproject_block_(projections, volume, proj_geom, vol_geom, operation =
     finally:
         astra.algorithm.delete(projector_id)
         astra.data3d.delete(sin_id)
-        astra.data3d.delete(vol_id)            
+        astra.data3d.delete(vol_id)           
             
 def backproject(projections, volume, geometry, algorithm = 'BP3D_CUDA', operation = '+'):
     """
@@ -199,12 +245,23 @@ def forwardproject(projections, volume, geometry, operation = '+'):
             # Forwardproject:
             _forwardproject_block_(block, volume, proj_geom, vol_geom, operation)  
                      
-def init_volume(projections):
+def init_volume(projections, geometry = None):
     """
     Initialize a standard volume array.
     """          
-    shape = projections.shape
-    return numpy.zeros([shape[0], shape[2], shape[2]], dtype = 'float32')
+    
+    if geometry:
+        sample = geometry['sample']
+
+        offset = int(abs(geometry['vol_tra'][0]) / geometry['img_pixel'] / sample[1])
+
+    else:
+        offset = 0
+        
+        sample = [1, 1]
+
+    shape = projections[::sample[0], ::, ::sample[1]].shape
+    return numpy.zeros([shape[0], shape[2]+offset, shape[2]+offset], dtype = 'float32')
     
 def sample_FDK(projections, geometry, sample):
     """
@@ -212,35 +269,46 @@ def sample_FDK(projections, geometry, sample):
     """
     
     # Standard volume:
-    #backproject(projections, volume, geometry, 'FDK_CUDA')
+    
     # Adapt the geometry to the subsampling level:
-    projections_ = numpy.ascontiguousarray(projections[::sample[0], :, ::sample[1]]) 
-    volume = init_volume(projections_)
+    volume = init_volume(projections, geometry, sample)
     
+    # Change sampling:
+
     # Initialize ASTRA geometries:
-    vol_geom = flexData.astra_vol_geom(geometry, volume.shape, sample = sample)
-    proj_geom = flexData.astra_proj_geom(geometry, projections_.shape, sample = sample)    
+    #vol_geom = flexData.astra_vol_geom(geometry, volume.shape, sample = sample)
+    #proj_geom = flexData.astra_proj_geom(geometry, projections_.shape, sample = sample)    
+    geometry_ = geometry.copy()
+
+    # Apply subsampling to detector and volume:    
+    geometry_['anisotrpy'] = [sample[0], sample[1], sample[1]]
+    geometry_['sample'] = sample
+
+    FDK(projections, volume, geometry_)
     
-    _backproject_block_(projections_, volume, proj_geom, vol_geom, 'FDK_CUDA')
+    #_backproject_block_(projections_, volume, proj_geom, vol_geom, 'FDK_CUDA')
     
     # Apply correct scaling:
-    volume /= geometry['img_pixel']**4     
+    #volume /= geometry['img_pixel']**4     
     
-    return volume
+    return volume 
     
 def FDK(projections, volume, geometry):
     """
-    FDK
+    FDK.
     """
     print('FDK reconstruction...')
+    
+    # Sampling:
+    samp = geometry['sample']
     
     # Make sure array is contiguous (if not memmap):
     flexUtil.progress_bar(0)    
     
-    backproject(projections / geometry['img_pixel']**4, volume, geometry, 'FDK_CUDA')
+    backproject(projections[::samp[0],: , ::samp[1]] / (numpy.prod(geometry['sample']) * geometry['img_pixel'])**4, volume, geometry, 'FDK_CUDA')
     
     flexUtil.progress_bar(1) 
-    
+        
 def _block_index_(ii, block_number, length, mode = 'sequential'):
     """
     Create a slice for a projection block
@@ -271,10 +339,10 @@ def _block_index_(ii, block_number, length, mode = 'sequential'):
     last = min((length + 1, (ii + 1) * block_length))
     
     return index[first:last]
-    
-def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+'):
+
+def _L2_step_ctf_(projections, prj_weight, volume, geometry, options, operation = '+'):
     """
-    Update volume: single SIRT step.
+    A CTF version of the L2 update step.
     """
     
     # CTF, mode of indexing:
@@ -310,26 +378,19 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
         else:
             block = (projections[:, index, :]).copy()
             block = numpy.ascontiguousarray(block)
-                
-        if ctf is None:
-            
-            # Forwardproject:
-            _forwardproject_block_(block, -volume, proj_geom, vol_geom, '+')   
-            
-        else:
-            
-            # Reserve memory for a forward projection (keep it separate because of CTF application):
-            synth = numpy.ascontiguousarray(numpy.zeros_like(block))
-  
-            # Forwardproject:
-            _forwardproject_block_(synth, volume, proj_geom, vol_geom, '+')   
-            
-            # CTF can be applied to each projection separately:
-            synth = flexModel.apply_ctf(synth, ctf)
-
-            # Compute residual:        
-            block = (block - synth)
         
+        # Reserve memory for a forward projection (keep it separate because of CTF application):
+        synth = numpy.ascontiguousarray(numpy.zeros_like(block))
+  
+        # Forwardproject:
+        _forwardproject_block_(synth, volume, proj_geom, vol_geom, '+')   
+        
+        # CTF can be applied to each projection separately:
+        synth = flexModel.apply_ctf(synth, ctf)
+
+        # Compute residual:        
+        block = (block - synth)
+    
         # Take into account Poisson:
         if options.get('poisson_weight'):
             # Some formula representing the effect of photon starvation...
@@ -356,6 +417,167 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
         numpy.clip(volume, a_min = options['bounds'][0], a_max = options['bounds'][1], out = volume) 
 
     return l2   
+    
+def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+'):
+    """
+    Update volume: single SIRT step.
+    """
+    
+    # Mode of indexing:
+    mode = options.get('mode')
+    
+    # How many blocks?    
+    block_number = options.get('block_number')
+    if block_number is None: block_number = 1
+    
+    # Force block number if array is numpy.memmap
+    if isinstance(projections, numpy.memmap):
+        block_number  = max((10, block_number))
+        
+    length = projections.shape[1]
+    
+    # Initialize ASTRA geometries:
+    vol_geom = flexData.astra_vol_geom(geometry, volume.shape)      
+    
+    for ii in range(block_number):
+        
+        # Create index slice to address projections:
+        index = _block_index_(ii, block_number, length, mode)
+        if index is []: break
+
+        # Extract a block:
+        proj_geom = flexData.astra_proj_geom(geometry, projections.shape, index = index)    
+        
+        # Copy data to a block or simply pass a pointer to data itself if block is one.
+        if (mode == 'sequential') & (block_number == 1):
+            block = projections.copy()
+            
+        else:
+            block = (projections[:, index, :]).copy()
+            block = numpy.ascontiguousarray(block)
+                
+        # Forwardproject:
+        _forwardproject_block_(block, volume, proj_geom, vol_geom, '-')   
+                    
+        # Take into account Poisson:
+        if options.get('poisson_weight'):
+            
+            # Some formula representing the effect of photon starvation...
+            block *= numpy.exp(-projections[:, index, :])
+            
+        block *= prj_weight * block_number
+        
+        # Apply ramp to reduce boundary effects:
+        block = flexUtil.apply_edge_ramp(block, 10, extend = False)
+        
+        # L2 norm (use the last block to update):
+        if options.get('l2_update'):
+            l2 = (numpy.sqrt((block ** 2).mean()))
+            
+        else:
+            
+            l2 = 0 
+          
+        # Project
+        _backproject_block_(block, volume, proj_geom, vol_geom, 'BP3D_CUDA', operation)    
+    
+    # Apply bounds
+    if options.get('bounds') is not None:
+        numpy.clip(volume, a_min = options['bounds'][0], a_max = options['bounds'][1], out = volume) 
+
+    return l2   
+    
+def _fista_step_(projections, prj_weight, vol, vol_old, vol_t, t, geometry, options):
+    """
+    Update volume: single SIRT step.
+    """
+    
+    # Mode of indexing:
+    mode = options.get('mode')
+    
+    # How many blocks?    
+    block_number = options.get('block_number')
+    if block_number is None: block_number = 1
+    
+    # Force block number if array is numpy.memmap
+    if isinstance(projections, numpy.memmap):
+        block_number  = max((10, block_number))
+        
+    length = projections.shape[1]
+    
+    # Initialize ASTRA geometries:
+    vol_geom = flexData.astra_vol_geom(geometry, vol.shape)      
+    
+    vol_old[:] = vol.copy()  
+    
+    t_old = t 
+    t = (1 + numpy.sqrt(1 + 4 * t**2))/2
+
+    vol[:] = vol_t.copy()
+    
+    for ii in range(block_number):
+        
+        # Create index slice to address projections:
+        index = _block_index_(ii, block_number, length, mode)
+        if index is []: break
+
+        # Extract a block:
+        proj_geom = flexData.astra_proj_geom(geometry, projections.shape, index = index)    
+        
+        # Copy data to a block or simply pass a pointer to data itself if block is one.
+        if (mode == 'sequential') & (block_number == 1):
+            block = projections.copy()
+            
+        else:
+            block = (projections[:, index, :]).copy()
+            block = numpy.ascontiguousarray(block)
+                
+        # Forwardproject:
+        _forwardproject_block_(block, vol_t, proj_geom, vol_geom, '-')   
+                    
+        # Take into account Poisson:
+        if options.get('poisson_weight'):
+            # Some formula representing the effect of photon starvation...
+            block *= numpy.exp(-projections[:, index, :])
+            
+        block *= prj_weight * block_number
+        
+        # Apply ramp to reduce boundary effects:
+        block = flexUtil.apply_edge_ramp(block, 5, extend = False)
+        
+        # L2 norm (use the last block to update):
+        if options.get('l2_update'):
+            l2 = (numpy.sqrt((block ** 2).mean()))
+            
+        else:
+            l2 = 0 
+          
+        # Project
+        _backproject_block_(block, vol, proj_geom, vol_geom, 'BP3D_CUDA', '+')   
+        
+        vol_t[:] = vol + ((t_old - 1) / t) * (vol - vol_old)
+                
+    # Apply bounds
+    if options.get('bounds') is not None:
+        numpy.clip(vol, a_min = options['bounds'][0], a_max = options['bounds'][1], out = vol) 
+
+    return l2  
+    
+'''
+# Forward:
+    flex.project._forwardproject_block_(proj, vol_t, proj_geom, vol_geom, '-') 
+    
+    proj *= w
+    
+    vol_old = vol.copy()  
+    t_old = t
+    
+    x = vol_t
+    flex.project._backproject_block_(proj / L, x, proj_geom, vol_geom, 'BP3D_CUDA', '+')
+        
+    t = (1 + numpy.sqrt(1 + 4 * t**2))/2
+    vol_t = x + ((t_old - 1) / t) * (vol - vol_old)
+'''    
 
 def _em_step_(projections, prj_weight, volume, geometry, options):
     """
@@ -427,30 +649,29 @@ def _em_step_(projections, prj_weight, volume, geometry, options):
 
     return l2    
            
-def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight': False, 'l2_update': True, 'preview':False, 'bounds':None, 'block_number':1, 'index':'sequential', 'ctf': None}):
+def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight': False, 'l2_update': True, 'preview':False, 'bounds':None, 'block_number':10, 'mode':'sequential', 'ctf': None}):
     """
     SIRT
     CTF is only applied in the blocky version of SIRT!
-    """ 
-    # Make sure array is contiguous (if not memmap):
-    #if not isinstance(projections, numpy.memmap):
-    #    projections = numpy.ascontiguousarray(projections)        
+    """     
+    # Sampling:
+    samp = geometry['sample']
     
-    # We will use quick and dirty scaling coefficient instead of proper calculation of weights
-    #m = (geometry['src2obj'] + geometry['det2obj']) / geometry['src2obj']
-    prj_weight = 1 / (projections.shape[1] * (geometry['img_pixel']) ** 4 * max(volume.shape)) 
+    pix = max(samp) * geometry['img_pixel']
+    #pix = geometry['img_pixel']
+    prj_weight = 1 / (projections[::samp[0], :, ::samp[1]].shape[1] * pix ** 4 * max(volume.shape)) 
                     
     # Initialize L2:
-    l2 = []
+    l2 = []   
 
-    print('Doing SIRT`y things...')
+    print('Feeling SIRTy...')
     
     flexUtil.progress_bar(0)
         
     for ii in range(iterations):
     
         # Update volume:
-        l2_  = _L2_step_(projections, prj_weight, volume, geometry, options)
+        l2_  = _L2_step_(projections[::samp[0], :, ::samp[1]], prj_weight, volume, geometry, options)
         l2.append(l2_)
                     
         # Preview
@@ -460,12 +681,42 @@ def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight':
         flexUtil.progress_bar((ii+1) / iterations)
         
     if options.get('l2_update'):   
+         flexUtil.plot(l2, semilogy = True, title = 'Resudual L2')   
+         
+def FISTA(projections, volume, geometry, iterations, options = {'poisson_weight': False, 'l2_update': True, 'preview':False, 'bounds':None, 'block_number':10, 'mode':'sequential', 'ctf': None}):
+    # Sampling:
+    samp = geometry['sample']
+    
+    pix = max(samp) * geometry['img_pixel']
+    prj_weight = 1 / (projections[::samp[0], :, ::samp[1]].shape[1] * pix ** 4 * max(volume.shape)) 
+                    
+    # Initialize L2:
+    l2 = []   
+    t = 1
+    
+    volume_t = volume.copy()
+    volume_old = volume.copy()
 
-         plt.figure(15)
-         plt.plot(l2)
-         plt.title('Residual L2')    
+    print('FISTING in progress...')
+    
+    flexUtil.progress_bar(0)
+        
+    for ii in range(iterations):
+    
+        # Update volume:
+        l2_  = _fista_step_(projections[::samp[0], :, ::samp[1]], prj_weight, volume, volume_old, volume_t, t, geometry, options)
+        l2.append(l2_)
+        
+        # Preview
+        if options.get('preview'):
+            flexUtil.display_slice(volume, dim = 0)
+            
+        flexUtil.progress_bar((ii+1) / iterations)
+        
+    if options.get('l2_update'):   
+        flexUtil.plot(l2, semilogy = True, title = 'Resudual L2')   
 
-def SIRT_tiled(projections, volume, geometries, iterations, options = {'poisson_weight': False, 'l2_update': True, 'preview':False, 'bounds':None, 'block_number':1, 'index':'sequential', 'ctf': None}):
+def SIRT_tiled(projections, volume, geometries, iterations, options = {'poisson_weight': False, 'l2_update': True, 'preview':False, 'bounds':None, 'block_number':1, 'mode':'sequential', 'ctf': None}):
     """
     SIRT: tiled version.
     """ 
@@ -513,13 +764,108 @@ def SIRT_tiled(projections, volume, geometries, iterations, options = {'poisson_
         flexUtil.progress_bar((ii+1) / iterations)
         
     if options.get('l2_update'):   
+        flexUtil.plot(l2, semilogy = True, title = 'Resudual L2')      
+         
+def PWLS_M(projections, volume, geometries, n_iter = 10, block_number = 20, student = False, rings_t = 0, pwls = True, weight_power = 1): 
+    '''
+    Penalized Weighted Least Squares based on multiple inputs.
+    '''
+    #error log:
+    L = []
 
-         plt.figure(15)
-         plt.plot(l2)
-         plt.title('Residual L2')    
+    fac = volume.shape[2] * geometries[0]['img_pixel'] * numpy.sqrt(2)
+    
+    projsh= projections[0].shape[::2]
+
+    print('PWLS-ing in progress...')
+    flexUtil.progress_bar(0)
+    
+    # reconstruction volume:
+    ring = numpy.zeros([projsh[0], projsh[1]], dtype = 'float32')
+        
+    # Iterations:
+    for ii in range(n_iter):
+    
+        # Error:
+        L_mean = 0
+        
+        #Blocks:
+        for jj in range(block_number):        
+            
+            # Volume update:
+            vol_tmp = numpy.zeros_like(volume)
+            bwp_w = numpy.zeros_like(volume)
+            
+            for jj, projs in enumerate(projections):
+                index = _block_index_(jj, block_number, projs.shape[1], 'random')
+    
+                proj = numpy.ascontiguousarray(projs[:,index,:])
+                geom = geometries[jj]
+
+                proj_geom = flexData.astra_proj_geom(geom, projs.shape, index = index) 
+                vol_geom = flexData.astra_vol_geom(geom, volume.shape) 
+            
+                prj_tmp = numpy.zeros_like(proj)
+                
+                # Compute weights:
+                if pwls & ~ student:
+                    fwp_w = numpy.exp(-proj * weight_power)
+                    
+                else:
+                    fwp_w = numpy.ones_like(proj)
+                                        
+                #fwp_w = scipy.ndimage.morphology.grey_erosion(fwp_w, size=(3,1,3))
+                
+                _backproject_block_(fwp_w, bwp_w, proj_geom, vol_geom, 'BP3D_CUDA', '+')
+                
+                #flex.project.backproject(fwp_w, bwp_w, geom)  
+                _forwardproject_block_(prj_tmp, volume, proj_geom, vol_geom, '+') 
+                #flex.project.forwardproject(prj_tmp, volume, geom)
+            
+                if rings_t == 0:
+                    prj_tmp = (proj - prj_tmp) * fwp_w / fac
+
+                    #flex.util.display_slice(prj_tmp,dim=1, title='pre')
+                    if student:
+                        prj_tmp = studentst(prj_tmp, 5)
+                    
+                else:
+                    # Add rings removal:
+                    # Residual:                                
+                    prj_tmp = (proj + ring[:,None,:] - prj_tmp) * fwp_w / fac
+                    
+                    # Update rings:
+                    me = prj_tmp.mean(1) * 2
+                    #rec -= me
+                    ring -= (me - scipy.signal.medfilt(me, 5)) 
+                    
+                    ring = ring - ring.mean()
+                    ring = numpy.maximum(numpy.abs(ring)-rings_t, 0) * numpy.sign(ring)
+                    
+                    
+                _backproject_block_(prj_tmp, vol_tmp, proj_geom, vol_geom, 'BP3D_CUDA', '+')
+                
+                # Mean L for projection
+                L_mean += (prj_tmp**2).mean() 
+                
+            eps = bwp_w.max() / 100    
+            bwp_w[bwp_w < eps] = eps
+                
+            volume += vol_tmp / bwp_w
+            volume[volume < 0] = 0
+
+            #print((volume<0).sum())
+                
+        L.append(L_mean / block_number / len(projections))
+        
+        #flex.util.display_slice(vol_rec, title = 'Iter')
+        flexUtil.progress_bar((ii+1)/n_iter)
+        
+    flexUtil.plot(numpy.array(L), semilogy=True)
+    
+    return ring
          
-         
-def EM(projections, volume, geometry, iterations, options = {'preview':False, 'bounds':None, 'block_number':1, 'index':'sequential', 'l2_update': True}):
+def EM(projections, volume, geometry, iterations, options = {'preview':False, 'bounds':None, 'block_number':1, 'mode':'sequential', 'l2_update': True}):
     """
     Expectation Maximization
     """ 
@@ -561,12 +907,9 @@ def EM(projections, volume, geometry, iterations, options = {'preview':False, 'b
         flexUtil.progress_bar((ii+1) / iterations)
         
     if options.get('l2_update'):
+        flexUtil.plot(l2, semilogy = True, title = 'Resudual L2')   
 
-         plt.figure(15)
-         plt.plot(l2)
-         plt.title('Residual L2')
-
-def EM_tiled(projections, volume, geometries, iterations, options = {'poisson_weight': False, 'l2_update': True, 'preview':False, 'bounds':None, 'block_number':1, 'index':'sequential', 'ctf': None}):
+def EM_tiled(projections, volume, geometries, iterations, options = {'poisson_weight': False, 'l2_update': True, 'preview':False, 'bounds':None, 'block_number':1, 'mode':'sequential', 'ctf': None}):
     """
     EM: tiled version.
     """     
