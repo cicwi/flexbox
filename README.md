@@ -6,8 +6,9 @@ In a conda environment:
 conda install -c wjpalenstijn astra-toolbox
 conda install -c conda-forge xraylib=3.3.0
 conda install -c conda-forge toml
-conda install scikit-image
+conda install -c owlas transforms3d
 
+conda install scikit-image
 conda install matplotlib
 conda install imageio
 
