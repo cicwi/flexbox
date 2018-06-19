@@ -253,17 +253,17 @@ def init_volume(projections, geometry = None):
     if geometry:
         sample = geometry['sample']
 
-        offset = int(abs(geometry['vol_tra'][0]) / geometry['img_pixel'] / sample[1])
+        offset = int(abs(geometry['vol_tra'][0]) / geometry['img_pixel'] / sample[2])
 
     else:
         offset = 0
         
-        sample = [1, 1]
+        sample = [1, 1, 1]
 
-    shape = projections[::sample[0], ::, ::sample[1]].shape
+    shape = projections[::sample[0], ::sample[1], ::sample[2]].shape
     return numpy.zeros([shape[0], shape[2]+offset, shape[2]+offset], dtype = 'float32')
     
-def sample_FDK(projections, geometry, sample):
+def sample_FDK(projections, geometry, sample = [1,1,1]):
     """
     Quick reconstruction of a subsampled version of FDK
     """
@@ -281,7 +281,7 @@ def sample_FDK(projections, geometry, sample):
     geometry_ = geometry.copy()
 
     # Apply subsampling to detector and volume:    
-    geometry_['anisotrpy'] = [sample[0], sample[1], sample[1]]
+    geometry_['anisotrpy'] = [sample[0], sample[1], sample[2]]
     geometry_['sample'] = sample
 
     FDK(projections, volume, geometry_)
@@ -305,7 +305,7 @@ def FDK(projections, volume, geometry):
     # Make sure array is contiguous (if not memmap):
     flexUtil.progress_bar(0)    
     
-    backproject(projections[::samp[0],: , ::samp[1]] / (numpy.prod(geometry['sample']) * geometry['img_pixel'])**4, volume, geometry, 'FDK_CUDA')
+    backproject(projections[::samp[0],::samp[1], ::samp[2]] / (numpy.prod(samp) * geometry['img_pixel'])**4, volume, geometry, 'FDK_CUDA')
     
     flexUtil.progress_bar(1) 
         
@@ -451,6 +451,7 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
         # Copy data to a block or simply pass a pointer to data itself if block is one.
         if (mode == 'sequential') & (block_number == 1):
             block = projections.copy()
+            #block = projections
             
         else:
             block = (projections[:, index, :]).copy()
@@ -656,10 +657,11 @@ def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight':
     """     
     # Sampling:
     samp = geometry['sample']
-    
-    pix = max(samp) * geometry['img_pixel']
-    #pix = geometry['img_pixel']
-    prj_weight = 1 / (projections[::samp[0], :, ::samp[1]].shape[1] * pix ** 4 * max(volume.shape)) 
+    anisotropy = geometry['anisotropy']
+
+    #pix = max(samp) * geometry['img_pixel']
+    pix = (geometry['img_pixel']**4 * anisotropy[0] * anisotropy[1] * anisotropy[2] * anisotropy[2])
+    prj_weight = 8 / (projections[::samp[0], ::samp[1], ::samp[2]].shape[1] * pix * max(volume.shape)) 
                     
     # Initialize L2:
     l2 = []   
@@ -671,12 +673,12 @@ def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight':
     for ii in range(iterations):
     
         # Update volume:
-        l2_  = _L2_step_(projections[::samp[0], :, ::samp[1]], prj_weight, volume, geometry, options)
+        l2_  = _L2_step_(projections[::samp[0], ::samp[1], ::samp[2]], prj_weight, volume, geometry, options)
         l2.append(l2_)
                     
         # Preview
         if options.get('preview'):
-            flexUtil.display_slice(volume, dim = 0)
+            flexUtil.display_slice(volume, dim = 1)
             
         flexUtil.progress_bar((ii+1) / iterations)
         
@@ -687,8 +689,10 @@ def FISTA(projections, volume, geometry, iterations, options = {'poisson_weight'
     # Sampling:
     samp = geometry['sample']
     
-    pix = max(samp) * geometry['img_pixel']
-    prj_weight = 1 / (projections[::samp[0], :, ::samp[1]].shape[1] * pix ** 4 * max(volume.shape)) 
+    #pix = max(samp) * geometry['img_pixel']
+    pix = geometry['img_pixel']
+
+    prj_weight = 1 / (projections[::samp[0], ::samp[1], ::samp[2]].shape[1] * pix ** 4 * max(volume.shape)) 
                     
     # Initialize L2:
     l2 = []   
@@ -704,7 +708,7 @@ def FISTA(projections, volume, geometry, iterations, options = {'poisson_weight'
     for ii in range(iterations):
     
         # Update volume:
-        l2_  = _fista_step_(projections[::samp[0], :, ::samp[1]], prj_weight, volume, volume_old, volume_t, t, geometry, options)
+        l2_  = _fista_step_(projections[::samp[0], ::samp[1], ::samp[2]], prj_weight, volume, volume_old, volume_t, t, geometry, options)
         l2.append(l2_)
         
         # Preview

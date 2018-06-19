@@ -627,7 +627,7 @@ def create_geometry(src2obj, det2obj, det_pixel, theta_range):
     # Create an empty dictionary:
     geometry = {'det_pixel':det_pixel, 'det_hrz':0., 'det_vrt':0., 'det_mag':0., 
     'src_hrz':0., 'src_vrt':0., 'src_mag':0., 'axs_hrz':0., 'det_rot':0., 'anisotropy':[1,1,1],
-    'vol_rot':[0. ,0. ,0.], 'vol_hrz':0., 'vol_tra':[0., 0., 0.], 'vol_mag':0., 'sample':[1,1],
+    'vol_rot':[0. ,0. ,0.], 'vol_hrz':0., 'vol_tra':[0., 0., 0.], 'vol_mag':0., 'sample':[1,1,1],
     'src2obj': src2obj, 'det2obj':det2obj, 'unit':'millimetre', 'type':'flex', 'binning': 1}
     
     geometry['src2det'] = geometry.get('src2obj') + geometry.get('det2obj')

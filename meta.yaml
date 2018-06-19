@@ -3,13 +3,22 @@ package:
   version: 0.0.1
 
 source:
-  git_rev: master
-  git_url: https://github.com/cicwi/flexbox.git
-
+  path: .
+#  git_rev: experimental
+#  git_url: https://github.com/cicwi/flexbox.git
+# 
 requirements:
   build:
     - python
     - setuptools
+    - scikit-image >=0.13.0
+    - scipy >=0.14
+    - imageio
+    - matplotlib
+    - transforms3d
+    - toml
+    - astra-toolbox >1.8.3
+    - xraylib >=3.3.0
 
   run:
     - python >3.0
@@ -18,10 +27,14 @@ requirements:
     - scipy >=0.14
     - imageio
     - matplotlib
+    - transforms3d
+    - toml
+    - astra-toolbox >1.8.3
+    - xraylib >=3.3.0
 
 test:
   imports:
-    -
+    - flexbox
 
 about:
   home: https://github.com/cicwi/flexbox
