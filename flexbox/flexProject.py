@@ -439,6 +439,8 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
     # Initialize ASTRA geometries:
     vol_geom = flexData.astra_vol_geom(geometry, volume.shape)      
     
+    l2 = 0
+    
     for ii in range(block_number):
         
         # Create index slice to address projections:
@@ -474,10 +476,6 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
         # L2 norm (use the last block to update):
         if options.get('l2_update'):
             l2 = (numpy.sqrt((block ** 2).mean()))
-            
-        else:
-            
-            l2 = 0 
           
         # Project
         _backproject_block_(block, volume, proj_geom, vol_geom, 'BP3D_CUDA', operation)    
