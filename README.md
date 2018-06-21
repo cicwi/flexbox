@@ -1,19 +1,26 @@
-# Install
+# Installation instructions...
 
-In a conda environment:
+If you intend to install Flexbox as a conda package, use:
 
-```bash
-conda install -c wjpalenstijn astra-toolbox
-conda install -c conda-forge xraylib=3.3.0
-conda install -c conda-forge toml
-conda install -c owlas transforms3d
+> conda install -c teascavenger -c conda-forge -c astra-toolbox/label/dev -c owlas flexbox
 
-conda install scikit-image
-conda install matplotlib
-conda install imageio
+This will install dependencies from conda-forge and owlas channels.
 
-git clone https://github.com/cicwi/flexbox
-cd flexbox
+If you want to use pip and setuptools (setup.py), first install all of the dependecies:
 
-pip install -e .
-```
+> conda install scikit-image
+> conda install matplotlib
+
+> conda install -c astra-toolbox/label/dev astra-toolbox
+
+> conda install -c conda-forge tifffile
+> conda install -c conda-forge xraylib=3.3.0
+> conda install -c conda-forge toml
+
+> conda install -c owlas transforms3d
+
+> git clone https://github.com/cicwi/flexbox
+> cd flexbox
+
+> pip install -e .
+

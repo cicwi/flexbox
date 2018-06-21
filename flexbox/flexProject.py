@@ -450,7 +450,6 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
         # Extract a block:
         proj_geom = flexData.astra_proj_geom(geometry, projections.shape, index = index)    
         
-        # Copy data to a block or simply pass a pointer to data itself if block is one.
         if (mode == 'sequential') & (block_number == 1):
             block = projections.copy()
             #block = projections
@@ -659,7 +658,7 @@ def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight':
 
     #pix = max(samp) * geometry['img_pixel']
     pix = (geometry['img_pixel']**4 * anisotropy[0] * anisotropy[1] * anisotropy[2] * anisotropy[2])
-    prj_weight = 8 / (projections[::samp[0], ::samp[1], ::samp[2]].shape[1] * pix * max(volume.shape)) 
+    prj_weight = 1 / (projections[::samp[0], ::samp[1], ::samp[2]].shape[1] * pix * max(volume.shape)) 
                     
     # Initialize L2:
     l2 = []   
@@ -687,10 +686,8 @@ def FISTA(projections, volume, geometry, iterations, options = {'poisson_weight'
     # Sampling:
     samp = geometry['sample']
     
-    #pix = max(samp) * geometry['img_pixel']
-    pix = geometry['img_pixel']
-
-    prj_weight = 1 / (projections[::samp[0], ::samp[1], ::samp[2]].shape[1] * pix ** 4 * max(volume.shape)) 
+    pix = (geometry['img_pixel']**4 * anisotropy[0] * anisotropy[1] * anisotropy[2] * anisotropy[2])
+    prj_weight = 1 / (projections[::samp[0], ::samp[1], ::samp[2]].shape[1] * pix * max(volume.shape)) 
                     
     # Initialize L2:
     l2 = []   
