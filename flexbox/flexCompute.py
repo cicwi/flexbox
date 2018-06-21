@@ -687,6 +687,24 @@ def moment2(data, power, dim, centered = True):
         return numpy.sum(x[None, :, None] * data)
     else:
         return numpy.sum(x[None, None, :] * data)
+    
+def interpolate_lines(proj):
+    '''
+    Interpolate values of the horizontal read out lines of the flexray flat panel detector.
+    '''
+    
+    lines = numpy.ones(proj.shape[0::2], dtype = bool)    
+    
+    sz = proj.shape[1]
+    
+    if sz == 1536:
+        lines[125::256, :] = 0
+        lines[126::256, :] = 0    
+    else:
+        step = sz // 12
+        lines[(step//2-1)::step, :] = 0    
+
+    interpolate_holes(proj, lines, kernel = [2,2])            
         
 def interpolate_holes(data, mask2d, kernel = [2,2]):
         '''
