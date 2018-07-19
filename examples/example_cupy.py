@@ -8,6 +8,9 @@ import flexbox as flex
 import numpy
 import cupy
 
+# OUT OF ORDER!!!
+
+'''
 #%% Read
 
 path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/'
@@ -40,3 +43,4 @@ vol = numpy.zeros([1, 2000, 2000], dtype = 'float32')
 flex.project.FDK(proj, vol, meta['geometry'])
 
 flex.util.display_slice(vol, bounds = [], title = 'FDK')
+'''

@@ -6,18 +6,14 @@ Test flexData module.
 #%%
 import flexbox as flex
 import numpy
-import sys
 
 #%% Read
 
-if len(sys.argv) == 2:
-    path = sys.argv[1]
-else:
-    path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/'
+path = '/ufs/ciacc/flexbox/al_test/90KV_no_filt/'
 
 dark = flex.data.read_raw(path, 'di')
 flat = flex.data.read_raw(path, 'io')    
-proj = flex.data.read_raw(path, 'scan_', memmap = '/export/scratch3/kostenko/flexbox_swap/swap.prj')
+proj = flex.data.read_raw(path, 'scan_', memmap = '/ufs/ciacc/flexbox/swap/swap.prj')
 
 meta = flex.data.read_log(path, 'flexray')   
  

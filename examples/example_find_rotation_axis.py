@@ -9,10 +9,7 @@ import sys
 import numpy
 
 #%% Read
-if len(sys.argv) == 2:
-    path = sys.argv[1]
-else:
-    path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/'
+path = '/ufs/ciacc/flexbox/al_test/90KV_no_filt/'
 
 dark = flex.data.read_raw(path, 'di')
 flat = flex.data.read_raw(path, 'io')    
@@ -31,7 +28,7 @@ flex.util.display_slice(proj, title = 'Sinogram')
 
 #%% Use optimize_rotation_center:
     
-guess = flex.compute.optimize_rotation_center(proj, meta['geometry'], guess = 0, subscale = 16)
+guess = flex.compute.optimize_rotation_center(proj, meta['geometry'], guess = 0, subscale = 8)
 
 #%% Recon
 meta['geometry']['axs_hrz'] = guess

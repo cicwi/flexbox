@@ -5,13 +5,9 @@ Test reading Flexray raw and writing ASTRA readable
 """
 #%%
 import flexbox as flex
-import sys
 
 #%% Read / write a geometry file:
-if len(sys.argv) == 2:
-    path = sys.argv[1]
-else:
-    path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/'
+path = '/ufs/ciacc/flexbox/al_test/90KV_no_filt/'
 
 meta = flex.data.read_log(path, 'flexray') 
 

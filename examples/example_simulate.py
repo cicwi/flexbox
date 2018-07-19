@@ -14,7 +14,7 @@ vol = numpy.zeros([1, 512, 512], dtype = 'float32')
 proj = numpy.zeros([1, 361, 512], dtype = 'float32')
 
 # Define a simple projection geometry:
-geometry = flex.data.create_geometry(src2obj = 100, det2obj = 100, det_pixel = 0.01, theta_range = [0, 360], theta_count = 361)
+geometry = flex.data.create_geometry(src2obj = 100, det2obj = 100, det_pixel = 0.01, theta_range = [0, 360])
 
 # Create phantom and project into proj:
 vol = flex.model.phantom(vol.shape, 'bubble', [150, 15, 1.5])     
@@ -37,13 +37,13 @@ flex.util.display_slice(vol_rec)
 vol_rec = numpy.zeros_like(vol)
 
 options = {'bounds':[0, 10], 'l2_update':True, 'block_number':5, 'mode':'random'}
-flex.project.EM(proj, vol_rec, geometry, iterations = 20, options = options)
+flex.project.EM(proj, vol_rec, geometry, iterations = 10, options = options)
 flex.util.display_slice(vol_rec)
 
 #%% SIRT
 vol = numpy.zeros([1, 512, 512], dtype = 'float32')
 
-options = {'bounds':[0, 10], 'l2_update':True, 'block_number':20, 'mode':'random'}
-flex.project.SIRT(proj, vol, geometry, iterations = 20, options = options)
+options = {'bounds':[0, 10], 'l2_update':True, 'block_number':5, 'mode':'random'}
+flex.project.SIRT(proj, vol, geometry, iterations = 10, options = options)
 
 flex.util.display_slice(vol, title = 'SIRT')

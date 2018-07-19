@@ -5,7 +5,6 @@ Test forward / backward projection of a 2D phantom.
 """
 #%%
 import flexbox as flex
-
 import numpy
 
 #%% Create volume and forward project:
@@ -36,6 +35,10 @@ flex.util.display_slice(vol_rec)
 #%% Apply ramp:
 vol_rec *= 0 
 
-flex.project.FDK(flex.util.apply_edge_ramp(proj, [0, 200]), vol_rec, geometry)
+proj = flex.data.pad(proj, 2, [0, 200], mode = 'edge')
+
+flex.util.display_slice(proj, 'Padded projections.') 
+
+flex.project.FDK(proj, vol_rec, geometry)
 
 flex.util.display_slice(vol_rec)    

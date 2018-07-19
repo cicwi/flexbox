@@ -7,14 +7,10 @@ Test flex.data module.
 import flexbox as flex
 import numpy
 import astra
-import sys
 
 #%% Read data:
     
-if len(sys.argv) == 2:
-    path = sys.argv[1]
-else:
-    path = '/export/scratch3/kostenko/Fast_Data/salt_no_filter'
+path = '/ufs/ciacc/flexbox/al_test/90KV_no_filt/'
 
 dark = flex.data.read_raw(path, 'di')
 flat = flex.data.read_raw(path, 'io')    
