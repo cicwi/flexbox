@@ -251,7 +251,7 @@ def init_volume(projections, geometry = None):
     """          
     
     if geometry:
-        sample = geometry['sample']
+        sample = geometry['proj_sample']
 
         offset = int(abs(geometry['vol_tra'][0]) / geometry['img_pixel'] / sample[2])
 
@@ -300,7 +300,7 @@ def FDK(projections, volume, geometry):
     print('FDK reconstruction...')
     
     # Sampling:
-    samp = geometry['sample']
+    samp = geometry['proj_sample']
     
     # Make sure array is contiguous (if not memmap):
     flexUtil.progress_bar(0)    
@@ -656,8 +656,8 @@ def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight':
     CTF is only applied in the blocky version of SIRT!
     """     
     # Sampling:
-    samp = geometry['sample']
-    anisotropy = geometry['anisotropy']
+    samp = geometry['proj_sample']
+    anisotropy = geometry['vol_sample']
 
     #pix = max(samp) * geometry['img_pixel']
     pix = (geometry['img_pixel']**4 * anisotropy[0] * anisotropy[1] * anisotropy[2] * anisotropy[2])
@@ -687,7 +687,7 @@ def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight':
          
 def FISTA(projections, volume, geometry, iterations, options = {'poisson_weight': False, 'l2_update': True, 'preview':False, 'bounds':None, 'block_number':10, 'mode':'sequential', 'ctf': None}):
     # Sampling:
-    samp = geometry['sample']
+    samp = geometry['proj_sample']
     
     pix = (geometry['img_pixel']**4 * anisotropy[0] * anisotropy[1] * anisotropy[2] * anisotropy[2])
     prj_weight = 1 / (projections[::samp[0], ::samp[1], ::samp[2]].shape[1] * pix * max(volume.shape)) 

@@ -704,36 +704,63 @@ def interpolate_lines(proj):
         step = sz // 12
         lines[(step-1)::step*2, :] = 0    
 
-    interpolate_holes(proj, lines, kernel = [1,1])            
-        
-def interpolate_holes(data, mask2d, kernel = [2,2]):
-        '''
-        Fill in the holes, for instance, saturated pixels.
-        
-        Args:
-            mask2d: holes are zeros. Mask is the same for all projections.
-        '''
-        mask_norm = ndimage.filters.gaussian_filter(numpy.float32(mask2d), sigma = kernel)
-        #flexUtil.display_slice(mask_norm, title = 'mask_norm')
-        
-        sh = data.shape[1]
-        flexUtil.progress_bar(0)        
-        for ii in range(sh):    
-                
-            data[:, ii, :] = data[:, ii, :] * mask2d           
-
-            # Compute the filler:
-            tmp = ndimage.filters.gaussian_filter(data[:, ii, :], sigma = kernel) / mask_norm      
-                                                  
-            #flexUtil.display_slice(tmp, title = 'tmp')
-
-            # Apply filler:                 
-            data[:, ii, :][~mask2d] = tmp[~mask2d]
+    interpolate_holes(proj, lines, kernel = [1,1])   
+          
+def interpolate_holes(data, mask2d, kernel = [1,1]):
+    '''
+    Fill in the holes, for instance, saturated pixels.
+    
+    Args:
+        mask2d: holes are zeros. Mask is the same for all projections.
+    '''
+    mask_norm = ndimage.filters.gaussian_filter(numpy.float32(mask2d), sigma = kernel)
+    #flexUtil.display_slice(mask_norm, title = 'mask_norm')
+    
+    sh = data.shape[1]
+    flexUtil.progress_bar(0)        
+    for ii in range(sh):    
             
-            # Show progress:
-            flexUtil.progress_bar((ii+1) / sh)
+        data[:, ii, :] = data[:, ii, :] * mask2d           
 
-def residual_rings(data, kernel=[3, 1, 3]):
+        # Compute the filler:
+        tmp = ndimage.filters.gaussian_filter(data[:, ii, :], sigma = kernel) / mask_norm      
+                                              
+        #flexUtil.display_slice(tmp, title = 'tmp')
+
+        # Apply filler:                 
+        data[:, ii, :][~mask2d] = tmp[~mask2d]
+        
+        # Show progress:
+        flexUtil.progress_bar((ii+1) / sh)
+            
+def expand_medipix(data):
+    
+    # Bigger array:
+    sz = numpy.array(data.shape)
+    sz[0] += 4
+    sz[2] += 4
+    new = numpy.zeros(sz, dtype = data.dtype)
+    
+    for ii in range(data.shape[1]):
+        
+        img = numpy.insert(data[: ,ii, :], 257, -1, axis = 0)
+        img = numpy.insert(img, 256, -1, axis = 0)
+        img = numpy.insert(img, 256, -1, axis = 0)
+        img = numpy.insert(img, 255, -1, axis = 0)
+    
+        img = numpy.insert(img, 257-2, -1, axis = 1)
+        img = numpy.insert(img, 256-2, -1, axis = 1)
+        img = numpy.insert(img, 256-2, -1, axis = 1)
+        img = numpy.insert(img, 255-2, -1, axis = 1)
+        
+        new[: ,ii, :] = img
+        
+    mask = img >= 0
+    interpolate_holes(new, mask, kernel = [1,1])        
+        
+    return new            
+
+def residual_rings(data, kernel=[3, 3]):
     '''
     Apply correction by computing outlayers .
     '''
@@ -769,7 +796,6 @@ def residual_rings(data, kernel=[3, 1, 3]):
         data[:, ii, :] = block 
     
     print('Residual ring correcion applied.')
-    return data
 
 def subtract_air(data, air_val = None):
     '''
@@ -810,9 +836,7 @@ def subtract_air(data, air_val = None):
         data[:, ii, :] = block
 
         flexUtil.progress_bar((ii+1) / data.shape[1])
-        
-    return data
-                    
+                            
 def _parabolic_min_(values, index, space):    
     '''
     Use parabolic interpolation to find the extremum close to the index value:
@@ -952,14 +976,9 @@ def process_flex(path, options = {'bin':1, 'memmap': None}):
     # Read:    
     print('Reading...')
     
-    dark = flexData.read_raw(path, 'di', sample = [bins, bins])
-    flat = flexData.read_raw(path, 'io', sample = [bins, bins])    
-    
     index = []
-    proj = flexData.read_raw(path, 'scan_', skip = skip, sample = [bins, bins], memmap = memmap, index = index)
-
-    meta = flexData.read_log(path, 'flexray', bins = bins)   
-            
+    proj, flat, dark, meta = flexData.read_flexray(path, skip = skip, sample = bins, memmap = memmap, index = index)
+                
     # Show fow much memory we have:
     flexUtil.print_memory()     
     

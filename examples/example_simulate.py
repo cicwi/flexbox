@@ -14,7 +14,7 @@ vol = numpy.zeros([1, 512, 512], dtype = 'float32')
 proj = numpy.zeros([1, 361, 512], dtype = 'float32')
 
 # Define a simple projection geometry:
-geometry = flex.data.create_geometry(src2obj = 100, det2obj = 100, det_pixel = 0.01, theta_range = [0, 360])
+geometry = flex.data.create_geometry(src2obj = 100, det2obj = 100, det_pixel = 0.01, theta_range = [0, 360], type = 'simple')
 
 # Create phantom and project into proj:
 vol = flex.model.phantom(vol.shape, 'bubble', [150, 15, 1.5])     
