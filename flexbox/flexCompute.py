@@ -15,17 +15,89 @@ import scipy.ndimage.interpolation as interp
 from . import flexUtil
 from . import flexData
 from . import flexProject
+from . import flexModel
 
-def binary_threshold(data, mode = 'histogram'):
+def generate_stl(data, geometry):
+    """
+    Make a mesh from a volume.
+    """
+    
+    from skimage import measure
+    from stl import mesh
+
+    # Segment the volume:
+    threshold = binary_threshold(data, mode = 'otsu')
+    
+    # Close small holes:
+    print('Filling small holes...')
+    threshold = ndimage.morphology.binary_fill_holes(threshold, structure = numpy.ones((3,3,3)))
+
+    print('Generating mesh...')
+    # Use marching cubes to obtain the surface mesh of these ellipsoids
+    verts, faces, normals, values = measure.marching_cubes_lewiner(threshold, 0)
+
+    print('Mesh with %1.1e vertices generated.' % verts.shape[0])
+    
+    # Create stl:    
+    stl_mesh = mesh.Mesh(numpy.zeros(faces.shape[0], dtype=mesh.Mesh.dtype))
+    stl_mesh.vectors = verts[faces] * geometry['img_pixel']
+    
+    return stl_mesh
+
+def bounding_box(data):
+    """
+    Find a bounding box for the volume (use for auto_crop).
+    """
+    data = data.copy()
+    
+    soft_threshold(data, mode = 'otsu')
+
+    integral = numpy.float32(data).sum(0)
+    
+    # Filter noise:
+    integral = ndimage.gaussian_filter(integral, 10)
+    mean = numpy.mean(integral[integral > 0])
+    integral[integral < mean / 10] = 0
+    
+    # Compute bounding box:
+    rows = numpy.any(integral, axis=1)
+    cols = numpy.any(integral, axis=0)
+    b = numpy.where(rows)[0][[0, -1]]
+    c = numpy.where(cols)[0][[0, -1]]
+    
+    integral = numpy.float32(data).sum(1)
+        
+    # Filter noise:
+    integral = ndimage.gaussian_filter(integral, 10)
+    mean = numpy.mean(integral[integral > 0])
+    integral[integral < mean / 10] = 0
+    
+    # Compute bounding box:
+    rows = numpy.any(integral, axis=1)
+    a = numpy.where(rows)[0][[0, -1]]
+    
+    return a, b, c
+
+def soft_threshold(data, mode = 'histogram', threshold = 0):
+    """
+    Removes values smaller than the threshold value.
+    
+        mode (str)       : 'histogram', 'otsu' or 'constant'
+        threshold (float): threshold value if mode = 'constant'
+    """
+    
+    data[~binary_threshold(data, mode, threshold)] = 0
+    
+def binary_threshold(data, mode = 'histogram', threshold = 0):
     '''
-    Thresholds the data below the first minimum in the histogram or using the Otsu approach
+    Compute binary mask that is True when values are above threshold. 
+    Use 'histogram, 'otsu', or 'constant' mode.
     '''
     
     import matplotlib.pyplot as plt
     import skimage.filters
     
     print('Applying binary threshold...')
-    
     
     if mode == 'otsu':
         threshold = skimage.filters.threshold_otsu(data[::2,::2,::2])    
@@ -70,14 +142,14 @@ def binary_threshold(data, mode = 'histogram'):
     
             print('Saddle point found next to the air peak at: %0.3f' % x[ind])        
             
-    else: raise ValueError('Wrong mode parameter. Can be histogram or otsu.')
+    elif mode == 'constant':
+        pass        
             
-    # Zero the intensity below extrema:
-    data[data < threshold] = 0
-
-    print('Discarding intensity below %0.3f' % threshold)
-
-    return data
+    else: raise ValueError('Wrong mode parameter. Can be histogram or otsu.')
+    
+    print('Threshold value is %0.3f' % threshold)
+    
+    return data > threshold
     
 def _find_best_flip_(fixed, moving, Rfix, Tfix, Rmov, Tmov, use_CG = True, sample = 2):
     """
@@ -131,6 +203,70 @@ def _find_best_flip_(fixed, moving, Rfix, Tfix, Rmov, Tmov, use_CG = True, sampl
             flexUtil.display_projection(fixed - affine(moving, Rtot_, Ttot_), title = 'Diff (%u). L2 = %f' %(ii, L))
     
     return Rtot, Ttot * sample 
+
+def convolve_kernel(data, kernel):
+    """
+    Compute convolution with a kernel using FFT.
+    """
+    kernel = numpy.fft.fftshift(kernel)
+    kernel = numpy.fft.fftn(kernel).conj()
+    
+    return numpy.real(numpy.fft.ifftn(numpy.fft.fftn(data) * kernel))
+
+def find_marker(data, meta, r = 5):
+    """
+    Find a marker in 3D volume by applying a circular kernel with inner radius r [mm].
+    """
+    
+    #data = data.copy()
+    
+    # Get areas with significant density:
+    threshold = numpy.float32(binary_threshold(data, mode = 'otsu'))
+    
+    # Create a circular kernel:
+    kernel = numpy.zeros_like(data)
+
+    flexModel.phantom.sphere(kernel, meta['geometry'], r * 2, [0,0,0])
+    kernel *= -0.5
+    flexModel.phantom.sphere(kernel, meta['geometry'], r, [0,0,0])
+
+    kernel[kernel > 0] *= ((r * 2)**3 - r**3) / r**3
+    
+    print('Computing feature sizes...')
+    
+    # Map showing the relative size of feature
+    A = convolve_kernel(threshold, kernel)
+    A /= A.max()
+    
+    print('Estimating local variance...')
+    
+    # Now estimate the local variance:
+    B = ndimage.filters.laplace(data) ** 2    
+    B /= data    
+    
+    # Make sure that boundaries don't affect variance estimation:
+    threshold = threshold == 0
+    
+    threshold = ndimage.morphology.binary_dilation(threshold)
+    
+    B[threshold] = 0
+    B = ndimage.filters.gaussian_filter(B, 3)
+    B /= B.max()
+    
+    # Compute final weight:    
+    A -= B
+    
+    index = numpy.argmax(A)
+    
+    # Display:
+    flexUtil.display_max_projection(A, dim = 0, title = 'Marker map')
+    
+    # Coordinates:
+    a, b, c = numpy.unravel_index(index, A.shape)
+    
+    print('Found the marker at:', a, b, c)
+    
+    return a, b, c
     
 def moments_orientation(data, subsample = 1):
     '''
@@ -952,7 +1088,7 @@ def optimize_rotation_center(projections, geometry, guess = None, subscale = 1, 
     
     return guess
 
-def process_flex(path, options = {'bin':1, 'memmap': None}):
+def process_flex(path, sample = 1, skip = 1, memmap = None):
     '''
     Read and process the data.
     
@@ -965,22 +1101,14 @@ def process_flex(path, options = {'bin':1, 'memmap': None}):
         meta: meta data
         
     '''
-    
-    bins = options.get('bin')
-    memmap = options.get('memmap')
-    
-    skip = options.get('skip')
-    if skip is None:
-        skip = bins
-    
     # Read:    
     print('Reading...')
     
     index = []
-    proj, flat, dark, meta = flexData.read_flexray(path, skip = skip, sample = bins, memmap = memmap, index = index)
+    proj, flat, dark, meta = flexData.read_flexray(path, skip = skip, sample = sample, memmap = memmap, index = index)
                 
     # Show fow much memory we have:
-    flexUtil.print_memory()     
+    #flexUtil.print_memory()     
     
     # Prepro:
     print('Processing...')
@@ -1017,7 +1145,7 @@ def process_flex(path, options = {'bin':1, 'memmap': None}):
         pylab.title('Thetas')
         
     # Show fow much memory we have:
-    flexUtil.print_memory()             
+    # flexUtil.print_memory()             
     
     return proj, meta
 
@@ -1246,17 +1374,29 @@ def append_tile(data, geom, tot_data, tot_geom):
         tot_data[:, ii, :] = ((base_dist * base) + (new_dist * new)) / norm
         
         flexUtil.progress_bar((ii+1) / tot_data.shape[1])
-    
-    #flexUtil.display_slice(new_dist, title = 'new_dist')    
-    #flexUtil.display_slice(base_dist, title = 'base_dist')    
-    
-    #flexUtil.display_slice(base, title = 'base')    
-    #flexUtil.display_slice(new, title = 'new')        
-    
-    #flexUtil.display_slice(tot_data[:, ii, :], title = 'tot_data')    
         
+def data_to_spectrum(path):
+    """
+    Convert data with Al calibration object at path to a spectrum.txt.
+    """
+    import os
 
-def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density = 2.7, threshold = None, iterations = 1000, n_bin = 10):
+    proj, meta = process_flex(path)
+    
+    flexUtil.display_slice(proj, dim=0,title = 'PROJECTIONS')
+
+    vol = flexProject.init_volume(proj, meta['geometry'])
+    
+    flexProject.FDK(proj, vol, meta['geometry'])
+    flexUtil.display_slice(vol, title = 'Uncorrected FDK')
+
+    e, s = calibrate_spectrum(proj, vol, meta, compound = 'Al', density = 2.7, iterations = 1000, n_bin = 20)   
+
+    file = os.path.join(path, 'spectrum.txt')
+    numpy.savetxt(file, [e, s])
+        
+    
+def calibrate_spectrum(projections, volume, meta, compound = 'Al', density = 2.7, threshold = None, iterations = 1000, n_bin = 10):
     '''
     Use the projection stack of a homogeneous object to estimate system's 
     effective spectrum.
@@ -1267,16 +1407,15 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     
     from . import flexSpectrum
     #import random
+    
+    geometry = meta['geometry']
 
     # Find the shape of the object:                                                    
     if threshold:
-        segmentation = numpy.array(volume > threshold, 'float32')
+        segmentation = numpy.float32(binary_threshold(volume, mode = 'constant', threshold = threshold))
     else:
-        #max_ = numpy.percentile(volume, 99)
-        #segmentation = numpy.array(volume > (max_/2), 'float32')
-        segmentation = binary_threshold(volume, mode = 'otsu')    
-        segmentation = numpy.array(segmentation > 0, 'float32')
-    
+        segmentation = numpy.float32(binary_threshold(volume, mode = 'otsu'))
+        
     # Crop:    
     #height = segmentation.shape[0]   
     #w = 15
@@ -1289,10 +1428,18 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     length = numpy.zeros_like(projections)    
     length = numpy.ascontiguousarray(length)
     flexProject.forwardproject(length, segmentation, geometry)
+        
+    intensity = numpy.exp(-projections)
+    
+    # Crop to avoid cone artefacts:
+    height = intensity.shape[0]//2
+    window = 10
+    intensity = intensity[height-window:height+window,:,:]
+    length = length[height-window:height+window,:,:]
     
     # Make 1D:
-    intensity = numpy.exp(-projections[length > 0] .ravel())
-    length = length[length > 0] .ravel()
+    intensity = intensity[length > 0].ravel()
+    length = length[length > 0].ravel()
     
     lmax = length.max()
     lmin = length.min()    
@@ -1341,8 +1488,8 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     intensity_0 = intensity_0[numpy.isfinite(intensity_0)]
 
     # Get rid of tales:
-    length_0 = length_0[5:-5]    
-    intensity_0 = intensity_0[5:-5]    
+    length_0 = length_0[5:-10]    
+    intensity_0 = intensity_0[5:-10]    
     
     # Enforce zero-one values:
     length_0 = numpy.insert(length_0, 0, 0)
@@ -1360,7 +1507,7 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     exp_matrix = numpy.exp(-numpy.outer(length_0, mu))
     
     # Initial guess of the spectrum:
-    spec = flexSpectrum.bremsstrahlung(energy, 100) 
+    spec = flexSpectrum.bremsstrahlung(energy, meta['settings']['voltage']) 
     spec *= flexSpectrum.scintillator_efficiency(energy, 'Si', rho = 5, thickness = 0.5)
     spec *= flexSpectrum.total_transmission(energy, 'H2O', 1, 1)
     spec *= energy
@@ -1405,17 +1552,15 @@ def calibrate_spectrum(projections, volume, geometry, compound = 'Al', density =
     
     
     print('Spectrum computed.')
-    
-    # synthetic intensity for a check:
-    _intensity = exp_matrix.dot(spec)  
-    
+        
     #flexUtil.plot(length_0, title = 'thickness')
     #flexUtil.plot(mu, title = 'mu')
     #flexUtil.plot(_intensity, title = 'synth_counts')
     
-    # Display:    
-   
+    # synthetic intensity for a check:
+    _intensity = exp_matrix.dot(spec)
     
+    # Display:       
     plt.figure()
     plt.semilogy(length[::200], intensity[::200], 'b.', lw=4, alpha=.8)
     plt.semilogy(length_0, intensity_0, 'g--')

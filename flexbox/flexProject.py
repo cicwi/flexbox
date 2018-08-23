@@ -253,7 +253,7 @@ def init_volume(projections, geometry = None):
     if geometry:
         sample = geometry['proj_sample']
 
-        offset = int(abs(geometry['vol_tra'][0]) / geometry['img_pixel'] / sample[2])
+        offset = int(abs(geometry['vol_tra'][2]) / geometry['img_pixel'] / sample[2])
 
     else:
         offset = 0

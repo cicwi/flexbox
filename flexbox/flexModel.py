@@ -13,79 +13,100 @@ from . import flexSpectrum
 from . import flexUtil
 from . import flexProject
 
-def phantom(shape, mode = 'bubble', parameters = [10, 1, 1], centre = [0,0,0]):
+class phantom():
     """
-    Create a phantom image.
+    Genereation of CT phantoms from geometrical primitives. Reads geometry data
+    to compute dimensions correctly.
+    """
     
-    Args:
-        shape (list): shape of the volume 
-        type (str): use 'bubble' or 'ball'
-        parameters (list or float): for the bubble - [outer radius, wall thickness, squeeze], ball - radius, squeeze
-    """    
+    @staticmethod
+    def _coords_(shape, geometry, offset = [0.,0.,0.]):
+        """
+        Coordinate space in mm.
+        """
+        voxel = geometry['img_pixel']
+        
+        xx = (numpy.arange(0, shape[0]) - shape[0] / 2) * voxel - offset[0] 
+        yy = (numpy.arange(0, shape[1]) - shape[1] / 2) * voxel - offset[1]
+        zz = (numpy.arange(0, shape[2]) - shape[2] / 2) * voxel - offset[2]
+        
+        return xx, yy, zz
     
-    xx = numpy.arange(0, shape[0]) - shape[0] / 2 - centre[0]
-    yy = numpy.arange(0, shape[1]) - shape[1] / 2 - centre[1]
-    zz = numpy.arange(0, shape[2]) - shape[2] / 2 - centre[2]
-    
-    if mode == 'bubble':
-        r0 = (parameters[0] - parameters[1])**2
-        r1 = (parameters[0])**2
-        e = parameters[2]
-
-        vol = ((xx[:, None, None]*e)**2 + (yy[None, :, None]/e)**2 + zz[None, None, :]**2)
-        vol = numpy.array(((vol > r0) & (vol < r1)), dtype = 'float32')   
-              
-    elif mode == 'ball':
-        r0 = parameters[0] ** 2
-        e = parameters[1]
-
-        vol = ((xx[:, None, None]*e)**2 + (yy[None, :, None]/e)**2 + zz[None, None, :]**2)
-        vol = numpy.array((vol < r0), dtype = 'float32') 
+    @staticmethod
+    def sphere(volume, geometry, r, offset = [0., 0., 0.]):
+        """
+        Make sphere. Radius is in units (geometry['unit'])
+        """
+        phantom.spheroid(volume, geometry, r, r, r, offset)
         
-    elif mode == 'box':
-        x = parameters[0]
-        y = parameters[1]
-        z = parameters[2]
+    @staticmethod
+    def spheroid(volume, geometry, r1, r2, r3, offset = [0., 0., 0.]):
+        """
+        Make a spheroid. 
+        """
+        shape = volume.shape
+        
+        # Get the coordinates in mm:
+        xx,yy,zz = phantom._coords_(shape, geometry, offset)
+        
+        # Volume init: 
+        volume += numpy.array((((xx[:, None, None]/r1)**2 + (yy[None, :, None]/r2)**2 + (zz[None, None, :]/r3)**2) < 1), dtype = 'float32') 
+        
+    @staticmethod
+    def cuboid(volume, geometry, a, b, c, offset = [0., 0., 0.]):
+        """
+        Make a cuboid. Dimensions are in units (geometry['unit'])
+        """
+        shape = volume.shape
+        
+        # Get the coordinates in mm:
+        xx,yy,zz = phantom._coords_(shape, geometry, offset)
+         
+        volume += numpy.array((abs(xx[:, None, None]) < a) * (abs(yy[None, :, None]) < b) * (abs(zz[None, None, :]) < c), dtype = 'float32')  
+        
+    @staticmethod        
+    def cylinder(volume, geometry, r, h, offset = [0., 0., 0.]):
+        """
+        Make a cylinder with a specified radius and height.
+        """
+        
+        shape = volume.shape
+        
+        # Get the coordinates in mm:
+        xx,yy,zz = phantom._coords_(shape, geometry, offset)
+         
+        volume += numpy.array(((zz[None, None, :])**2 + (yy[None, :, None])**2) < r, dtype = 'float32')         
+        volume *= (numpy.abs(xx[:, None, None]) < h)
 
-        vol = (abs(xx[:, None, None]) < x) * (abs(yy[None, :, None]) < y) * (abs(zz[None, None, :]) < z)
-        vol = numpy.array(vol, dtype = 'float32')     
+    @staticmethod        
+    def checkers(volume, geometry, frequency, offset = [0., 0., 0.]):
+        """
+        Make a 3D checkers board.
+        """
         
-    elif mode == 'cylinder':
-        r0 = parameters[0] ** 2
-        h = parameters[1]
-
-        vol = ((zz[None, None, :])**2 + (yy[None, :, None])**2)
-        vol = numpy.array(vol < r0, dtype = 'float32') 
+        shape = volume.shape
         
-        vol = vol * (numpy.abs(xx[:, None, None]) < h)
+        # Get the coordinates in mm:
+        xx,yy,zz = phantom._coords_(shape, geometry, offset)
         
-    elif mode == 'checkers':
-        return _checkers_(shape, parameters[0])
-        
-    else: ValueError('Unknown phantom type!')
-
-    return vol    
-
-def _checkers_(shape = [256, 256, 256], frequency = 8):
-        
-        vol = numpy.zeros(shape, dtype='bool')
+        volume_ = numpy.zeros(shape, dtype='bool')
         
         step = shape[1] // frequency
         
         for ii in range(0, frequency):
             sl = slice(ii*step, int((ii + 0.5) * step))
-            vol[sl, :, :] = ~vol[sl, :, :]
+            volume_[sl, :, :] = ~volume_[sl, :, :]
         
         for ii in range(0, frequency):
             sl = slice(ii*step, int((ii + 0.5) * step))
-            vol[:, sl, :] = ~vol[:, sl, :]
+            volume_[:, sl, :] = ~volume_[:, sl, :]
 
         for ii in range(0, frequency):
             sl = slice(ii*step, int((ii + 0.5) * step))
-            vol[:, :, sl] = ~vol[:, :, sl]
+            volume_[:, :, sl] = ~volume_[:, :, sl]
  
-        return numpy.float32(vol)        
-
+        volume *= volume_
+                
 def get_ctf(shape, mode = 'gaussian', parameter = 1):
     """
     Get a CTF (fft2(PSF)) of one of the following types: gaussian, dual_ctf, fresnel

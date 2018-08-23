@@ -198,8 +198,8 @@ def read_raw(path, name, skip = 1, sample = 1, x_roi = [], y_roi = [], dtype = '
 
     # Get rid of the corrupted data:
     if len(good) != file_n:
-        print('WARNING! %u files are CORRUPTED!'%(file_n - len(good)))
-        
+        warnings.warn('%u files are CORRUPTED!'%(file_n - len(good)))
+                
         indx = indx[good]
         data = data[good]
 
@@ -211,7 +211,7 @@ def read_raw(path, name, skip = 1, sample = 1, x_roi = [], y_roi = [], dtype = '
 
     return data    
 
-def write_raw(path, name, data, dim = 1, skip = 1, dtype = None, compress = False):
+def write_raw(path, name, data, dim = 1, skip = 1, dtype = None, compress = None):
     """
     Write a tiff stack.
     
@@ -237,7 +237,7 @@ def write_raw(path, name, data, dim = 1, skip = 1, dtype = None, compress = Fals
     
     for ii in range(file_num):
         
-        path_name = os.path.join(path, name + '_%06u.tiff'% (ii*skip))
+        path_name = os.path.join(path, name + '_%06u'% (ii*skip))
         
         # Extract one slice from the big array
         sl = flexUtil.anyslice(data, ii * skip, dim)
@@ -248,10 +248,25 @@ def write_raw(path, name, data, dim = 1, skip = 1, dtype = None, compress = Fals
             img = cast2type(img, dtype, bounds)
         
         # Write it!!!
-        write_tiff(path_name, img, compress)
+        if (compress == 'zip'):
+            write_tiff(path_name + '.tiff', img, 1)
+            
+        elif (not compress):
+            write_tiff(path_name + '.tiff', img, 0)
+            
+        elif compress == 'jp2':  
+            write_tiff(path_name + '.jp2', img, 1)
+            
+            '''
+            To enable JPEG 2000 support, you need to build and install the OpenJPEG library, version 2.0.0 or higher, before building the Python Imaging Library.
+            conda install -c conda-forge openjpeg
+            '''
+            
+        else:
+            raise ValueError('Unknown compression!')
                 
         flexUtil.progress_bar((ii+1) / file_num)
-        
+                
 def write_tiff(filename, image, compress = 0):
     """
     Write a single tiff image.
@@ -506,7 +521,7 @@ def _translate_(destination, source, dictionary):
             destination[key] = source[dictionary[key]]
             
         else:
-            print('Warning! Record is not found:', dictionary[key])
+            warnings.warn('Record is not found: ' + dictionary[key])
 
 def _metadata_translate_(records):                  
     """
@@ -640,7 +655,7 @@ def read_meta(file_path):
         meta = toml.load(file_path)
         
     except:
-        print('WARNING! No meta file found at:'+file_path)
+        warnings.warn('No meta file found at:'+file_path)
         meta = None    
     
     return meta
@@ -1158,7 +1173,7 @@ def _read_tiff_(file, sample = 1, x_roi = [], y_roi = []):
     # Sometimes files dont have an extension. Fix it!
     # Here I will supress warnings, as some tif files give an annoying UseWarning but seem to work otherwise
     
-    warnings.filterwarnings("ignore")
+    #warnings.filterwarnings("ignore")
     if os.path.splitext(file)[1] == '':
         #im = imageio.imread(file, format = 'tif', offset = 0)
         im = imageio.imread(file, format = 'tif')
@@ -1166,7 +1181,7 @@ def _read_tiff_(file, sample = 1, x_roi = [], y_roi = []):
         #im = imageio.imread(file, offset = 0)
         im = imageio.imread(file)
         
-    warnings.filterwarnings("default")        
+    #warnings.filterwarnings("default")        
         
     # TODO: Use kwags offset  and size to apply roi!
     if (y_roi != []):
@@ -1203,7 +1218,8 @@ def _file_to_dictionary_(path, file_mask, separator = ':'):
 
     # Check if there is one file:
     if len(log_file) == 0:
-        print('Warning! Log file not found in path: ' + path + ' *'+file_mask+'*')
+        warnings.warn('Log file not found in path: ' + path + ' *'+file_mask+'*')
+
         return None
         
     if len(log_file) > 1:

@@ -113,6 +113,8 @@ def progress_bar(progress):
     """
     Plot progress in pseudographics:
     """
+    
+    # TODO: replace with tqdm!!!
     global glob_time 
     
     
@@ -187,6 +189,9 @@ def display_slice(data, index = None, dim = 0, bounds = None, title = None, cmap
     
         img = numpy.squeeze(data[sl])
         
+        # There is a bug in plt. It doesn't like float16
+        if img.dtype == 'float16': img = numpy.float32(img)
+        
     plt.figure()
     if bounds:
         plt.imshow(img, vmin = bounds[0], vmax = bounds[1], cmap = cmap)
@@ -198,11 +203,31 @@ def display_slice(data, index = None, dim = 0, bounds = None, title = None, cmap
     if title:
         plt.title(title)
         
-    plt.show()    
+    plt.show()  
+    
+def display_mesh(stl_mesh):
+    """
+    Display an stl mesh. Use flexCompute.generate_stl(volume) to generate mesh.
+    """    
+    from mpl_toolkits import mplot3d
+        
+    figure = plt.figure()
+    axes = mplot3d.Axes3D(figure)
+
+    axes.add_collection3d(mplot3d.art3d.Poly3DCollection(stl_mesh.vectors))
+    # Auto scale to the mesh size
+    scale = stl_mesh.points.flatten(-1)
+    axes.auto_scale_xyz(scale, scale, scale)
+    # Show the plot to the screen
+    plt.show()
+
 
 def display_projection(data, dim = 1, bounds = None, title = None, cmap = 'gray'):
     
     img = data.sum(dim)
+    
+    # There is a bug in plt. It doesn't like float16
+    img = numpy.float32(img)
     
     plt.figure()
     
@@ -222,6 +247,11 @@ def display_max_projection(data, dim = 0, title = None, cmap = 'gray'):
     
     img = data.max(dim)
     
+    # There is a bug in plt. It doesn't like float16
+    img = numpy.float32(img)
+    
+    plt.figure()
+    
     plt.imshow(img, cmap = cmap)
     plt.colorbar()
     
@@ -233,6 +263,11 @@ def display_max_projection(data, dim = 0, title = None, cmap = 'gray'):
 def display_min_projection(data, dim = 0, title = None, cmap = 'gray'):
     
     img = data.min(dim)
+    
+    # There is a bug in plt. It doesn't like float16
+    img = numpy.float32(img)
+    
+    plt.figure()
     
     plt.imshow(img, cmap = cmap)
     plt.colorbar()
