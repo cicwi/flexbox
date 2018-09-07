@@ -78,8 +78,8 @@ class Block:
         
         gc.collect()
         
-        time.sleep(1)
-        
+        time.sleep(2)
+                
         print('Data flushed.')
         
     def __del__(self):
@@ -142,7 +142,7 @@ class Pipe:
         # This one maps function names to condition that have to be used with them:
         self._condition_dictionary_ = {'shift':['shift'], 'scan_flexray': ['path'], 'read_flexray': ['sampling'], 'register_volumes':[], 
         'read_all_meta':[],'tiled_sirt': [], 'process_flex': [], 'shape': ['shape'],'sirt': [], 'find_rotation':[], 'equalize_intensity':[],
-        'merge_detectors': ['memmap'], 'merge_volume':['memmap'], 'fdk': [], 'write_flexray': ['folder'], 'crop': ['crop'],'em':[],'ramp':['width'],
+        'merge_detectors': [], 'merge_volume':[], 'fdk': [], 'write_flexray': ['folder'], 'crop': ['crop'],'em':[],'ramp':['width'],
         'cast2int':['bounds'], 'display':[], 'memmap':['path'], 'read_volume': [], 'equalize_resolution':[], 'bin':[], 'bh_correction':['compound','path', 'density']}
         
         # This one maps function names to function types. There are three: batch, standby, coincident
@@ -299,8 +299,10 @@ class Pipe:
             if self._block_:
                 self._block_.flush()
                 
+            flexUtil.print_memory()    
+                
             self._block_ = self._pick_data_()
-        
+            
             # Trickle the bastard down the pipe!
             for action in self._action_que_:
                 
@@ -341,6 +343,8 @@ class Pipe:
                     
                     # Collect garbage:
                     gc.collect() 
+                    
+                    flexUtil.print_memory()
                             
                     # Make an end log record
                     self._block_.finish(action.name, action.conditions)
@@ -634,19 +638,9 @@ class Pipe:
             b0 = flexData.detector_bounds(data.data.shape, self._data_que_[0].meta['geometry'])
             b1 = flexData.detector_bounds(data.data.shape, self._data_que_[1].meta['geometry'])
             
-            print('***')
-            print(self._data_que_[0].meta['geometry']['det_vrt'])
-            print('***')
-            print(self._data_que_[1].meta['geometry']['det_vrt'])
-            print('***')
-            print(self._data_que_[2].meta['geometry']['det_vrt'])
-            print('***')
-            
             overlap = min(abs(b0['vrt'][1] - b1['vrt'][0]), abs(b0['vrt'][0] - b1['vrt'][1]))
             
             # This is in volume (img_pixel):
-            print('overlap', overlap)
-            print('det_pixel', data.geometry['det_pixel'])
             overlap = int(overlap / data.geometry['det_pixel'] / 2)
             
             self._buffer_['overlap'] = overlap
@@ -660,11 +654,12 @@ class Pipe:
             overlap = self._buffer_['overlap']
             
         # Index of the current dataset:
-        vol_z = data.meta['geometry']['vol_tra'][0] 
+        vol_z = data.meta['geometry']['vol_tra'][0]
+        
         offset = numpy.int32(flexData.mm2pixel(vol_z - vol_z0, data.geometry))
         
         # Crop data based on the size of the overlap:
-        ramp = data.data.shape[0] // 20
+        ramp = data.data.shape[0] // 10
         
         dif = int(overlap /2 - ramp)- 1 # to be safe....
         
@@ -676,7 +671,7 @@ class Pipe:
                     
         # Merge volumes with some ramp:
         index = numpy.arange(0, data.data.shape[0]) + offset
-        
+         
         jj = 0
         for ii in index[:ramp]:
             b = (jj+1) / ramp
@@ -702,7 +697,7 @@ class Pipe:
                 
         #total[index] = numpy.max([data.data, total[index]], 0)
         
-        #flexUtil.display_slice(total, dim = 1,title = 'vol merge')  
+        flexUtil.display_slice(total, dim = 1,title = 'vol merge')  
 
         self._buffer_['total'] = total 
 
@@ -780,7 +775,12 @@ class Pipe:
     def _ramp_(self, data, condition, count):
         
         width = condition.get('width')
-        data.data = flexUtil.apply_edge_ramp(data.data, width, False)
+        dim = condition.get('dim')
+        
+        data.data = flexData.pad(data.data, dim, width, mode = 'linear')
+        
+        #extend = condition.get('extend')
+        #data.data = flexUtil.apply_edge_ramp(data.data, width, extend)
     
     def _fdk_(self, data, condition, count):        
 
@@ -795,7 +795,7 @@ class Pipe:
         # Apply a small ramp to reduce filtering aretfacts:        
         ramp = condition.get('ramp')
         if ramp:
-            data.data = flexUtil.apply_edge_ramp(data.data, ramp)
+            data.data = flexData.pad(data.data, 2, [ramp, ramp], mode = 'linear')
         
         flexProject.FDK(data.data, vol, data.meta['geometry'])
         
@@ -871,6 +871,7 @@ class Pipe:
         """        
         dim = condition.get('dim')
         proj = condition.get('projection')
+        meta = condition.get('meta')
         
         if dim is None: 
             dim = 1
@@ -881,6 +882,10 @@ class Pipe:
                                         
         else:
             flexUtil.display_slice(data.data, dim = dim, title = 'Mid slice. Block #%u'%count)    
+                                   
+        if meta:
+           print('Geometry:')
+           print(data.meta['geometry'])
                 
     def _memmap_(self, data, condition, count):
         """

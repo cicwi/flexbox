@@ -271,7 +271,7 @@ def sample_FDK(projections, geometry, sample = [1,1,1]):
     # Standard volume:
     
     # Adapt the geometry to the subsampling level:
-    volume = init_volume(projections, geometry, sample)
+    volume = init_volume(projections, geometry)
     
     # Change sampling:
 
@@ -400,8 +400,9 @@ def _L2_step_ctf_(projections, prj_weight, volume, geometry, options, operation 
         block *= prj_weight * block_number
         
         # Apply ramp to reduce boundary effects:
-        block = flexUtil.apply_edge_ramp(block, 10, extend = False)
-        
+        block = block = flexData.ramp(block, 2, 5, mode = 'linear')
+        block = block = flexData.ramp(block, 0, 5, mode = 'linear')
+                
         # L2 norm (use the last block to update):
         if options.get('l2_update'):
             l2 = (numpy.sqrt((block ** 2).mean()))
@@ -450,7 +451,6 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
         # Extract a block:
         proj_geom = flexData.astra_proj_geom(geometry, projections.shape, index = index)    
         
-        # Copy data to a block or simply pass a pointer to data itself if block is one.
         if (mode == 'sequential') & (block_number == 1):
             block = projections.copy()
             #block = projections
@@ -471,8 +471,9 @@ def _L2_step_(projections, prj_weight, volume, geometry, options, operation = '+
         block *= prj_weight * block_number
         
         # Apply ramp to reduce boundary effects:
-        block = flexUtil.apply_edge_ramp(block, 10, extend = False)
-        
+        block = flexData.ramp(block, 0, 5, mode = 'linear')
+        block = flexData.ramp(block, 2, 5, mode = 'linear')
+                
         # L2 norm (use the last block to update):
         if options.get('l2_update'):
             l2 = (numpy.sqrt((block ** 2).mean()))
@@ -542,8 +543,9 @@ def _fista_step_(projections, prj_weight, vol, vol_old, vol_t, t, geometry, opti
         block *= prj_weight * block_number
         
         # Apply ramp to reduce boundary effects:
-        block = flexUtil.apply_edge_ramp(block, 5, extend = False)
-        
+        block = block = flexData.ramp(block, 2, 5, mode = 'linear')
+        block = block = flexData.ramp(block, 0, 5, mode = 'linear')
+                
         # L2 norm (use the last block to update):
         if options.get('l2_update'):
             l2 = (numpy.sqrt((block ** 2).mean()))
@@ -659,7 +661,7 @@ def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight':
 
     #pix = max(samp) * geometry['img_pixel']
     pix = (geometry['img_pixel']**4 * anisotropy[0] * anisotropy[1] * anisotropy[2] * anisotropy[2])
-    prj_weight = 8 / (projections[::samp[0], ::samp[1], ::samp[2]].shape[1] * pix * max(volume.shape)) 
+    prj_weight = 1 / (projections[::samp[0], ::samp[1], ::samp[2]].shape[1] * pix * max(volume.shape)) 
                     
     # Initialize L2:
     l2 = []   
@@ -687,10 +689,8 @@ def FISTA(projections, volume, geometry, iterations, options = {'poisson_weight'
     # Sampling:
     samp = geometry['sample']
     
-    #pix = max(samp) * geometry['img_pixel']
-    pix = geometry['img_pixel']
-
-    prj_weight = 1 / (projections[::samp[0], ::samp[1], ::samp[2]].shape[1] * pix ** 4 * max(volume.shape)) 
+    pix = (geometry['img_pixel']**4 * anisotropy[0] * anisotropy[1] * anisotropy[2] * anisotropy[2])
+    prj_weight = 1 / (projections[::samp[0], ::samp[1], ::samp[2]].shape[1] * pix * max(volume.shape)) 
                     
     # Initialize L2:
     l2 = []   

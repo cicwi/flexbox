@@ -19,6 +19,7 @@ requirements:
     - toml
     - astra-toolbox >1.8.3
     - xraylib >=3.3.0
+    - tifffile
 
   run:
     - python >3.0
@@ -31,6 +32,7 @@ requirements:
     - toml
     - astra-toolbox >1.8.3
     - xraylib >=3.3.0
+    - tifffile
 
 test:
   imports:
@@ -40,3 +42,11 @@ about:
   home: https://github.com/cicwi/flexbox
   license:
   license_file:
+
+
+# Use:
+# > conda build -c astra-toolbox/label/dev -c conda-forge -c owlas .
+# > anaconda login
+# > anaconda upload /ufs/kostenko/miniconda3/conda-bld/linux-64/flexbox-0.0.1-py36_0.tar.bz2
+
+# Add package by: conda install -c astra-toolbox/label/dev scipy imageio matplotlib toml astra-toolbox scikit-image xraylib

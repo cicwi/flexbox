@@ -12,7 +12,7 @@ import numpy
 
 #%% Read the data 
 
-path = '/export/scratch2/kostenko/archive/spectral/JINR_data/projections/SPos0/Energy150000/'    
+path = '/ufs/ciacc/flexbox/JINR_data/projections/SPos0/Energy150000/'    
 proj = flex.data.read_raw(path, '00')
 
 # Transpose for ASTRA compatibility:
@@ -58,7 +58,7 @@ theta_count = 360
 hrz_cntr = proj.shape[2] / 2
 vrt_cntr = proj.shape[0] / 2
 
-geometry = flex.data.create_geometry(src2obj, det2obj, det_pixel, theta_range, theta_count)
+geometry = flex.data.create_geometry(src2obj, det2obj, det_pixel, theta_range)
 
 # Source position:
 geometry['src_hrz'] = (822 - hrz_cntr) * det_pixel

@@ -8,7 +8,7 @@ Args:
 """
 import sys
 import os
-import flexData
+import flexbox as flex
 
 # Extract arguments:
 path = sys.argv[1]
@@ -18,9 +18,9 @@ print('Reading log file at:', path)
 print('Data shape', data_shape)
 
 # Read:
-meta = flexData.read_log(path, 'flexray')   
+meta = flex.data.read_log(path, 'flexray')   
 
 # Write:
-flexData.write_meta(os.path.join(path, 'flexray.toml'), meta)
-flexData.write_astra(os.path.join(path, 'projection.geom'), data_shape, meta['geometry'])
+flex.data.write_meta(os.path.join(path, 'flexray.toml'), meta)
+flex.data.write_astra(os.path.join(path, 'projection.geom'), data_shape, meta['geometry'])
 

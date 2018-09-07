@@ -37,6 +37,7 @@ flex.util.display_slice(vol_rec, title = 'Uncorrected FDK')
 flex.util.plot(vol_rec[0, 64])    
        
 #%% Beam hardening correction: 
+
 proj = -numpy.log(counts)
 energy, spectrum = flex.compute.calibrate_spectrum(proj, vol_rec, geometry, compound = 'Al', density = 2.7, n_bin = 50)   
 proj = flex.compute.equivalent_density(proj, geometry, energy, spectrum, compound = 'Al', density = 2.7) 

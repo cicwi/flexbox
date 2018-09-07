@@ -687,6 +687,24 @@ def moment2(data, power, dim, centered = True):
         return numpy.sum(x[None, :, None] * data)
     else:
         return numpy.sum(x[None, None, :] * data)
+    
+def interpolate_lines(proj):
+    '''
+    Interpolate values of the horizontal read out lines of the flexray flat panel detector.
+    '''
+    
+    lines = numpy.ones(proj.shape[0::2], dtype = bool)    
+    
+    sz = proj.shape[0]
+    
+    if sz == 1536:
+        lines[125::256, :] = 0
+        lines[126::256, :] = 0    
+    else:
+        step = sz // 12
+        lines[(step-1)::step*2, :] = 0    
+
+    interpolate_holes(proj, lines, kernel = [1,1])            
         
 def interpolate_holes(data, mask2d, kernel = [2,2]):
         '''
@@ -897,7 +915,7 @@ def optimize_rotation_center(projections, geometry, guess = None, subscale = 1, 
         print('Subscale factor %1d' % subscale)    
 
         # We will use constant subscale in the vertical direction but vary the horizontal subscale:
-        samp =  [20, subscale]
+        samp =  [20, subscale, subscale]
 
         # Create a search space of 5 values around the initial guess:
         trial_values = numpy.linspace(guess - img_pix * subscale, guess + img_pix * subscale, 5)
@@ -942,6 +960,9 @@ def process_flex(path, options = {'bin':1, 'memmap': None}):
 
     meta = flexData.read_log(path, 'flexray', bins = bins)   
             
+    # Show fow much memory we have:
+    flexUtil.print_memory()     
+    
     # Prepro:
     print('Processing...')
     if dark.ndim > 2:
@@ -975,6 +996,9 @@ def process_flex(path, options = {'bin':1, 'memmap': None}):
         import pylab
         pylab.plot(thetas, thetas ,'*')
         pylab.title('Thetas')
+        
+    # Show fow much memory we have:
+    flexUtil.print_memory()             
     
     return proj, meta
 
@@ -1421,9 +1445,7 @@ def equivalent_density(projections, geometry, energy, spectrum, compound, densit
     thickness = numpy.linspace(thickness_min, thickness_max, max(projections.shape))
     
     exp_matrix = numpy.exp(-numpy.outer(thickness, mu))
-    
-    print('exp_matrix', exp_matrix.shape)
-    
+        
     synth_counts = exp_matrix.dot(spectrum)
     
     #flexUtil.plot(thickness, title = 'thickness')

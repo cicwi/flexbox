@@ -17,6 +17,7 @@ We can now read/write:
 import numpy
 import os
 import re
+import imageio
 import astra 
 import transforms3d
 import transforms3d.euler
@@ -152,8 +153,6 @@ def write_raw(path, name, data, dim = 1, skip = 1, dtype = None):
         dtype (type): forse this data type       
     """
     
-    import imageio
-    
     print('Writing data...')
     
     # Make path if does not exist:
@@ -186,8 +185,7 @@ def write_tiff(filename, image):
     """
     Write a single image.
     """ 
-    import imageio
-    
+        
     # Make path if does not exist:
     path = os.path.dirname(filename)
     if not os.path.exists(path):
@@ -334,32 +332,104 @@ def shape_alike(vol1, vol2):
         
         pp = d_shape[dim]
         if pp > 0:
-            vol1 = pad(vol1, dim, pp, symmetric = True, mode = 'linear_ramp')
+            vol1 = pad(vol1, dim, pp, symmetric = True, mode = 'linear')
         if pp < 0:
-            vol2 = pad(vol2, dim, -pp, symmetric = True, mode = 'linear_ramp')
+            vol2 = pad(vol2, dim, -pp, symmetric = True, mode = 'linear')
         
     return vol1, vol2    
 
-def pad(array, dim, width, symmetric = False, mode = 'constant'):
+def ramp(array, dim, width, mode = 'linear'):
     """
-    Pad an array along the given dimension.
+    Create ramps at the ends of the array (without changing its size). 
+    linear - creates linear decay of intensity
+    edge - smears data in a costant manner
+    zero - sets values to zeroes
     """
-    padl = numpy.zeros(3, dtype = int)
-    padr = numpy.zeros(3, dtype = int)
-
-    if numpy.size(width) > 1:
-        padl[dim] = int(width[0])
-        padr[dim] = int(width[1])
-        
-    else:    
-        if symmetric:        
-            padl[dim] = int(width) // 2
-            padr[dim] = int(width) - padl[dim] 
     
-        else:
-            padr[dim] = int(width)
+    # Left and right:
+    if numpy.size(width) > 1:
+        rampl = width[0]
+        rampr = width[1]
+    else:
+        rampl = width
+        rampr = width
         
-    return numpy.pad(array, ((padl[0], padr[0]), (padl[1], padr[1]), (padl[2], padr[2])), mode = mode)  
+    if array.shape[dim] < (rampl + rampr):
+        return array
+    
+    # Index of the left ramp:
+    left_sl = flexUtil.anyslice(array, slice(0, rampl), dim)
+    right_sl = flexUtil.anyslice(array, slice(-rampr, None), dim)
+    
+    if mode == 'zero':    
+        if rampl > 0:
+            array[left_sl] *= 0
+            
+        if rampr > 0:    
+            array[right_sl] *= 0
+            
+    elif (mode == 'edge'):
+        # Set everything to the edge value:
+        if rampl > 0:
+            array[left_sl] *= 0
+            flexUtil.add_dim(array[left_sl], array[flexUtil.anyslice(array, rampl, dim)])            
+            
+        if rampr > 0:    
+            array[right_sl] *= 0
+            flexUtil.add_dim(array[right_sl], array[flexUtil.anyslice(array, -rampr, dim)])            
+    
+    elif mode == 'linear':
+        # Set to edge and multiply by a ramp:
+        
+        if rampl > 0:            
+            # Replace values using add_dim:
+            array[left_sl] *= 0
+            flexUtil.add_dim(array[left_sl], array[flexUtil.anyslice(array, rampl, dim)])            
+            
+            flexUtil.mult_dim(array[left_sl], numpy.linspace(0, 1, rampl))        
+            
+        if rampr > 0:    
+            # Replace values using add_dim:
+            array[right_sl] *= 0
+            flexUtil.add_dim(array[right_sl], array[flexUtil.anyslice(array, -rampr, dim)])            
+
+            flexUtil.mult_dim(array[right_sl], numpy.linspace(1, 0, rampr))                    
+        
+    else:
+        raise(mode, '- unknown mode! Use linear, edge or zero.')
+        
+    return array
+
+#def pad(array, dim, width, symmetric = False, mode = 'edge'):
+def pad(array, dim, width, mode = 'edge'):
+    """
+    Pad an array along a given dimension.
+    
+    numpy.pad seems to be very memory hungry! Don't use it for large arrays.
+    """
+    print('Padding data...')
+    
+    if numpy.size(width) > 1:
+        padl = width[0]
+        padr = width[1]
+    else:
+        padl = width
+        padr = width
+    
+    # Original shape:
+    
+    sz1 = numpy.array(array.shape)    
+    
+    sz1[dim] += padl + padr
+    
+    # Initialize bigger array:
+    new = numpy.zeros(sz1, dtype = array.dtype)    
+    
+    sl = flexUtil.anyslice(new, slice(padl,-padr), dim)
+    
+    new[sl] = array
+    
+    return ramp(new, dim, width, mode)
  
 def bin(array):
     """
@@ -418,7 +488,6 @@ def crop(array, dim, width, symmetric = False, geometry = None):
         h = (widthl - widthr)
         array = array[:,:,widthl:-widthr]   
     
-    print(h)
     if geometry: shift_geometry(geometry, h/2, v/2)
     #if geometry: shift_geometry(geometry, -h/2, -v/2)
     
@@ -716,12 +785,16 @@ def _read_tiff_(file, sample = [1, 1], x_roi = [], y_roi = []):
     """
     Read a single image.
     """
-    import imageio
-    
-    im = imageio.imread(file, offset = 0)
-    
+        
+    # SOmetimes files dont have an extension. Fix it!
+    if os.path.splitext(file)[1] == '':
+        #im = imageio.imread(file, format = 'tif', offset = 0)
+        im = imageio.imread(file, format = 'tif')
+    else:
+        #im = imageio.imread(file, offset = 0)
+        im = imageio.imread(file)
+        
     # TODO: Use kwags offset  and size to apply roi!
-    
     if (y_roi != []):
         im = im[y_roi[0]:y_roi[1], :]
     if (x_roi != []):

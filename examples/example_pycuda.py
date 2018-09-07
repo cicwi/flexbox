@@ -7,7 +7,7 @@ Test flex.data module.
 import flexbox as flex
 import numpy
 import pycuda
-
+'''
 #%% Read
 
 path = '/export/scratch2/kostenko/archive/OwnProjects/al_tests/new/90KV_no_filt/'
@@ -66,3 +66,4 @@ import flex.compute
 
 
 flex.compute.optimize_rotation_center(proj, meta['geometry'], guess = 0, subscale = 4, center_of_mass = False)
+'''

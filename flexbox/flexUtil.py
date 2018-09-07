@@ -18,45 +18,88 @@ import matplotlib.pyplot as plt
 # Use global time variable to measure time needed to compute stuff:        
 glob_time = 0
 
-def apply_edge_ramp(data, width, extend = True):
-    '''
-    Apply ramp to the fringe of the tile to reduce artefacts.
-    '''
-    if numpy.size(width)>1:
-        w0 = width[0]
-        w1 = width[1]
-
-    else:   
-        w0 = width
-        w1 = width
+def print_memory():
+    import psutil
     
-    # Pad the data:
-    if extend:
-        data = numpy.pad(data, ((w0, w0), (0,0),(w1, w1)), mode = 'linear_ramp', end_values = 0)
-        
-    else:
-        if data.shape[0] > width*2:
-            data[-width:, :, :] *= numpy.linspace(1, 0, width)[:, None, None]
-            data[:width, :, :] *= numpy.linspace(0, 1, width)[:, None, None]
-
-        data[:, :, -width:] *= numpy.linspace(1, 0, width)[None, None, :]
-        data[:, :, :width] *= numpy.linspace(0, 1, width)[None, None, :]
-        
-    return data
-
-def mult_dim(array, vector, dim):
+    print('Free memory: %u GB (%u%% left)' % (psutil.virtual_memory().available/1e9, psutil.virtual_memory().available / psutil.virtual_memory().total * 100))
+    
+def add_dim(array_1, array_2):
     """
-    Multiply a 3D array by a 1D vector along one of the dimensions.
+    Add two arrays with arbitrary dimensions. We assume that one or two dimensions match.
     """
-    if dim == 0:
-        array *= vector[:, None, None]
+    
+    # Shapes to compare:
+    shp1 = numpy.shape(array_1)
+    shp2 = numpy.shape(array_2)
+    
+    dim1 = numpy.ndim(array_1)
+    dim2 = numpy.ndim(array_2)
+    
+    if dim1 - dim2 == 1:
         
-    elif dim == 1:
-        array *= vector[None, :, None]
+        # Find dimension that is missing in array_2:
+        dim = [ii not in shp2 for ii in shp1].index(True)
         
+        if dim == 0:
+            array_1 += array_2[None, :, :]
+        elif dim == 1:
+            array_1 += array_2[:, None, :]
+        elif dim == 2:
+            array_1 += array_2[:, :, None]            
+        
+    elif dim1 - dim2 == 2:
+        # Find dimension that is matching in array_2:
+        dim = [ii in shp2 for ii in shp1].index(True)
+        
+        if dim == 0:
+            array_1 += array_2[:, None, None]
+        elif dim == 1:
+            array_1 += array_2[None, :, None]
+        else:
+            array_1 += array_2[None, None, :]
+            
     else:
-        array *= vector[None, None, :]
-
+        raise('ERROR! array_1.ndim - array_2.ndim should be 1 or 2')
+            
+    
+def mult_dim(array_1, array_2):    
+    """
+    Multiply a 3D array by a 1D or a 2D vector along one of the dimensions.
+    
+    """
+    # Shapes to compare:
+    shp1 = numpy.shape(array_1)
+    shp2 = numpy.shape(array_2)
+    
+    dim1 = numpy.ndim(array_1)
+    dim2 = numpy.ndim(array_2)
+    
+    if dim1 - dim2 == 1:
+        
+        # Find dimension that is missing in array_2:
+        dim = [ii not in shp2 for ii in shp1].index(True)
+        
+        if dim == 0:
+            array_1 *= array_2[None, :, :]
+        elif dim == 1:
+            array_1 *= array_2[:, None, :]
+        elif dim == 2:
+            array_1 *= array_2[:, :, None]            
+        
+    elif dim1 - dim2 == 2:
+        # Find dimension that is matching in array_2:
+        dim = [ii in shp2 for ii in shp1].index(True)
+        
+        if dim == 0:
+            array_1 *= array_2[:, None, None]
+        elif dim == 1:
+            array_1 *= array_2[None, :, None]
+        else:
+            array_1 *= array_2[None, None, :]
+            
+    else:
+        raise('ERROR! array_1.ndim - array_2.ndim should be 1 or 2')
+        
 def anyslice(array, index, dim):
     """
     Slice an array along an arbitrary dimension.

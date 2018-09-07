@@ -6,7 +6,6 @@ We will simulate conditions close to micro-CT of a sea shell.
 """
 #%%
 import flexbox as flex
-
 import numpy
 
 #%% Create volume and forward project:
