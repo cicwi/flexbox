@@ -198,7 +198,7 @@ def backproject(projections, volume, geometry, algorithm = 'BP3D_CUDA', operatio
     """
     # If the data is not memmap:        
     if not isinstance(projections, numpy.memmap):    
-        print('FDK continu')
+        #print('FDK continu')
         
         projections = numpy.ascontiguousarray(projections) 
         
@@ -209,7 +209,7 @@ def backproject(projections, volume, geometry, algorithm = 'BP3D_CUDA', operatio
         _backproject_block_(projections, volume, proj_geom, vol_geom, algorithm, operation)
         
     else:
-        print('FDK blocky')
+        #print('FDK blocky')
         # Decide on the size of the block:
         n = projections.shape[1]    
         l = n // 20
@@ -333,7 +333,7 @@ def FDK(projections, volume, geometry):
     else:
         backproject(projections, volume, geometry, 'FDK_CUDA')
     
-    volume /= (numpy.prod(samp) * geometry['img_pixel'])**4
+    #volume /= (numpy.prod(samp) * geometry['img_pixel'])**4
     
     flexUtil.progress_bar(1) 
             

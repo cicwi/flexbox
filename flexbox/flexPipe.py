@@ -644,6 +644,9 @@ class Pipe:
             if not self._memmap_path_:
                 raise Exception('memmap_path is not initialized in pipe!')
             
+            if not os.path.exists(self._memmap_path_):
+                        os.mkdir(self._memmap_path_)  
+            
             memmap_file = os.path.join(self._memmap_path_, 'volume')
             self._memmaps_.append(memmap_file)
             
@@ -685,6 +688,9 @@ class Pipe:
             if not self._memmap_path_:
                 raise Exception('memmap_path is not initialized in pipe!')
             
+            if not os.path.exists(self._memmap_path_):
+                        os.mkdir(self._memmap_path_)  
+                        
             memmap_file = os.path.join(self._memmap_path_, 'projections')
             self._memmaps_.append(memmap_file)
             
@@ -819,6 +825,9 @@ class Pipe:
                     if not self._memmap_path_:
                         raise Exception('memmap_path is not initialized in pipe!')
                     
+                    if not os.path.exists(self._memmap_path_):
+                        os.mkdir(self._memmap_path_)  
+                        
                     file = os.path.join(self._memmap_path_, 'detector%u' % ii)
                                         
                     self._memmaps_.append(file)
@@ -931,6 +940,9 @@ class Pipe:
             if memmap: 
                 file = os.path.join(self._memmap_path_, 'volume')
                 
+                if not os.path.exists(self._memmap_path_):
+                        os.mkdir(self._memmap_path_)  
+                
                 self._memmaps_.append(file)
                 total = numpy.memmap(file, dtype=data.data.dtype, mode='w+', shape = (tot_shape[0],tot_shape[1],tot_shape[2]))       
                 
@@ -1042,7 +1054,8 @@ class Pipe:
         self._add_action_('merge_volume', self._merge_volume_, _ACTION_STANDBY_, memmap)     
         
     def _fdk_(self, data, count, argument):        
-
+        # TODO: test whether FDK is working with memmap projection data properly.
+        
         shape = data.data.shape
         #safety = data.data.shape[0] // 10
         vol = numpy.zeros([shape[0], shape[2], shape[2]], dtype = 'float32')
@@ -1340,6 +1353,9 @@ class Pipe:
                     
         if not self._memmap_path_:
             raise Exception('memmap_path is not initialized in pipe!')
+            
+        if not os.path.exists(self._memmap_path_):
+                        os.mkdir(self._memmap_path_)  
         
         memmap_file = os.path.join(self._memmap_path_, 'block_%u'%count)
         self._memmaps_.append(memmap_file)

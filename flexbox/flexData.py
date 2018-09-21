@@ -1305,6 +1305,9 @@ def _file_to_dictionary_(path, file_mask, separator = ':'):
                         var = var
                         
                     records[name] = var
+                    
+    if not records:
+        raise Exception('Something went wrong during parsing the log file at:' + path)                    
                 
     return records                
 
@@ -1396,7 +1399,7 @@ def ssh_put_path(hostname, username, password, local_path, remote_path):
     '''
     if not os.path.exists(local_path):
         os.mkdir(local_path)
-        print('Local directory created:', local_path)
+        #print('Local directory created:', local_path)
     
     # Connect to remote:
     sftp = _connect_sftp_(hostname, username, password, os.path.join(local_path, 'scp.log'))
@@ -1491,7 +1494,7 @@ class _MySFTPClient_(paramiko.SFTPClient):
         # Create new dirs:
         if not os.path.exists(local):
             os.mkdir(local)
-            print('Local directory created:', local)
+            #print('Local directory created:', local)
         
         # Copy files:
         for filename in self.listdir(remote):
