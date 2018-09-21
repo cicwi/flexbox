@@ -224,11 +224,8 @@ def find_marker(data, meta, r = 5):
     threshold = numpy.float32(binary_threshold(data, mode = 'otsu'))
     
     # Create a circular kernel:
-    kernel = numpy.zeros_like(data)
-
-    flexModel.phantom.sphere(kernel, meta['geometry'], r * 2, [0,0,0])
-    kernel *= -0.5
-    flexModel.phantom.sphere(kernel, meta['geometry'], r, [0,0,0])
+    kernel = -0.5 * flexModel.phantom.sphere(data.shape, meta['geometry'], r * 2, [0,0,0])
+    kernel += flexModel.phantom.sphere(data.shape, meta['geometry'], r, [0,0,0])
 
     kernel[kernel > 0] *= ((r * 2)**3 - r**3) / r**3
     
@@ -255,6 +252,10 @@ def find_marker(data, meta, r = 5):
     
     # Compute final weight:    
     A -= B
+    
+    print('A.max', A.max())
+    
+    print('A.mean', A[A > 0].mean())
     
     index = numpy.argmax(A)
     
@@ -361,7 +362,7 @@ def _mat2itk_(R, T, shape):
    
 def _moments_registration_(fixed, moving):
     """
-    Register two volumes useing image moments.
+    Register two volumes using image moments.
     
         Args:
         fixed (array): fixed 3D array
@@ -393,7 +394,7 @@ def _moments_registration_(fixed, moving):
     
     return Ttot, Rtot, Tfix
     
-def _itk_registration_(fixed, moving, R_init = None, T_init = None, shrink = [4, 1], smooth = [4, 0]):
+def _itk_registration_(fixed, moving, R_init = None, T_init = None, shrink = [4, 2, 1, 1], smooth = [8, 4, 2, 0]):
     """
     Carry out ITK based volume registration (based on Congugate Gradient).
     
@@ -441,7 +442,7 @@ def _itk_registration_(fixed, moving, R_init = None, T_init = None, shrink = [4,
     registration_method.SetInterpolator(sitk.sitkLinear)
 
     # Initial centering transform:
-    transform = _mat2itk_(R_init, T_init, fixed.shape)   
+    transform = _mat2itk_(R_init, T_init, fixed.shape)
     
     # Optimizer settings.
     registration_method.SetOptimizerAsPowell()
@@ -541,9 +542,9 @@ def register_volumes(fixed, moving, subsamp = 2, use_moments = True, use_CG = Tr
         #fixed_0 = binary_threshold(fixed_0, threshold)
         #moving_0 = binary_threshold(moving_0, threshold)
         
-        threshold = skimage.filters.threshold_otsu(numpy.appned(fixed_0[::2, ::2, ::2], moving_0[::2, ::2, ::2]))
-        fixed_0 = fixed_0[fixed_0 < threshold]
-        moving_0 = moving_0[moving_0 < threshold]
+        threshold = skimage.filters.threshold_otsu(numpy.append(fixed_0[::2, ::2, ::2], moving_0[::2, ::2, ::2]))
+        fixed_0[fixed_0 < threshold] = 0
+        moving_0[moving_0 < threshold] = 0
         
     L2 = norm(fixed_0 - moving_0)
     print('L2 norm before registration: %0.2e' % L2)
@@ -632,16 +633,21 @@ def register_astra_geometry(proj_fix, proj_mov, geom_fix, geom_mov, subsamp = 1)
     
     # Find maximum vol size:
     sz = numpy.array([proj_fix.shape, proj_mov.shape]).max(0)    
+    sz += 10 # for safety...
+    
     vol1 = numpy.zeros(sz, dtype = 'float32')
     vol2 = numpy.zeros(sz, dtype = 'float32')
     
-    flexProject.FDK(proj_fix, vol1, geom_fix)
+    flexProject.FDK(proj_fix, vol1, geom_fix)    
+    flexProject.SIRT(proj_fix, vol1, geom_fix, iterations = 2, options = {'bounds':[0, 5], 'block_number':10, 'mode':'random'})
+    
     flexProject.FDK(proj_mov, vol2, geom_mov)
+    flexProject.SIRT(proj_mov, vol2, geom_mov, iterations = 2, options = {'bounds':[0, 5], 'block_number':10, 'mode':'random'})
     
     #flexUtil.display_projection(vol1 - vol2, title = 'Before registration')
     
     # Find transformation between two volumes:
-    R, T = register_volumes(vol1, vol2, subsamp = subsamp, use_moments=True, use_CG=True)
+    R, T = register_volumes(vol1, vol2, subsamp = subsamp, use_moments = True, use_CG = True)
     
     #flexUtil.display_projection(vol1 - affine(vol2, R, T), title = 'Diff. After registration')
     #flexUtil.display_projection(vol1, title = 'V1. After registration')
@@ -789,7 +795,7 @@ def moment3(data, order, center = numpy.zeros(3), subsample = 1):
             m = numpy.arange(0, shape[dim], dtype = numpy.float32)
             m -= center[dim]
                 
-            flexUtil.mult_dim(data_, m[::subsample] ** order[dim], dim)    
+            flexUtil.mult_dim(data_, m[::subsample] ** order[dim])    
             
     return numpy.sum(data_) * (subsample**3)
     
@@ -1105,7 +1111,7 @@ def process_flex(path, sample = 1, skip = 1, memmap = None):
     print('Reading...')
     
     index = []
-    proj, flat, dark, meta = flexData.read_flexray(path, skip = skip, sample = sample, memmap = memmap, index = index)
+    proj, flat, dark, meta = flexData.read_flexray(path, sample = sample, skip = skip, memmap = memmap, index = index)
                 
     # Show fow much memory we have:
     #flexUtil.print_memory()     
@@ -1305,6 +1311,9 @@ def append_tile(data, geom, tot_data, tot_geom):
     total_shape = tot_data.shape[::2]
     det_shape = data.shape[::2]
     
+    if tot_data.shape[1] != data.shape[1]:
+        raise Exception('This data has different number of projections from the others. %u v.s. %u. Aborting!' % (data.shape[1], tot_data.shape[1]))
+    
     total_size = flexData.detector_size(total_shape, tot_geom)
     det_size = flexData.detector_size(det_shape, geom)
                     
@@ -1491,6 +1500,10 @@ def calibrate_spectrum(projections, volume, meta, compound = 'Al', density = 2.7
     length_0 = length_0[5:-10]    
     intensity_0 = intensity_0[5:-10]    
     
+    # Get rid of long rays (they are typically wrong...)   
+    intensity_0 = intensity_0[length_0 < 35]    
+    length_0 = length_0[length_0 < 35]    
+    
     # Enforce zero-one values:
     length_0 = numpy.insert(length_0, 0, 0)
     intensity_0 = numpy.insert(intensity_0, 0, 1)
@@ -1584,15 +1597,17 @@ def calibrate_spectrum(projections, volume, meta, compound = 'Al', density = 2.7
     
     return energy, spec
     
-def equivalent_density(projections, geometry, energy, spectrum, compound, density = 2, preview = True):
+def equivalent_density(projections, meta, energy, spectrum, compound, density = 2, preview = False):
     '''
     Transfrom intensity values to projected density for a single material data
     '''
     # Assuming that we have log data!
     from . import flexSpectrum    
-    import matplotlib.pyplot as plt
 
     print('Generating the transfer function.')
+    
+    if preview:
+        flexUtil.plot(energy, spectrum, semilogy=False, title = 'Spectrum')
     
     # Attenuation of 1 mm:
     mu = flexSpectrum.linear_attenuation(energy, compound, density)
@@ -1600,6 +1615,7 @@ def equivalent_density(projections, geometry, energy, spectrum, compound, densit
     # Make thickness range that is sufficient for interpolation:
     #m = (geometry['src2obj'] + geometry['det2obj']) / geometry['src2obj']
     #img_pix = geometry['det_pixel'] / m
+    geometry = meta['geometry']
     img_pix = geometry['img_pixel']
 
     thickness_min = 0
@@ -1617,11 +1633,7 @@ def equivalent_density(projections, geometry, energy, spectrum, compound, densit
     #flexUtil.plot(synth_counts, title = 'synth_counts')
     
     if preview:
-        plt.figure()
-        plt.semilogy(thickness, synth_counts, 'r-', lw=4, alpha=.8)
-        plt.axis('tight')
-        plt.title('Attenuation v.s. thickness [mm].')
-        plt.show()
+        flexUtil.plot(thickness,synth_counts, semilogy=True, title = 'Attenuation v.s. thickness [mm].')
     
     synth_counts = -numpy.log(synth_counts)
     

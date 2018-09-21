@@ -12,6 +12,7 @@ Displaying data and and other small useful routines.
 import time
 import numpy
 import matplotlib.pyplot as plt
+from matplotlib import ticker
 
 ''' * Methods * '''
 
@@ -172,7 +173,7 @@ def plot(x, y = None, semilogy = False, title = None, legend = None):
         
     plt.show()    
 
-def display_slice(data, index = None, dim = 0, bounds = None, title = None, cmap = 'gray'):
+def display_slice(data, index = None, dim = 0, bounds = None, title = None, cmap = 'gray', file = None):
     
     # Just in case squeeze:
     data = numpy.squeeze(data)
@@ -192,18 +193,26 @@ def display_slice(data, index = None, dim = 0, bounds = None, title = None, cmap
         # There is a bug in plt. It doesn't like float16
         if img.dtype == 'float16': img = numpy.float32(img)
         
-    plt.figure()
+    fig = plt.figure()
     if bounds:
-        plt.imshow(img, vmin = bounds[0], vmax = bounds[1], cmap = cmap)
+        imsh = plt.imshow(img, vmin = bounds[0], vmax = bounds[1], cmap = cmap)
     else:
-        plt.imshow(img, cmap = cmap)
+        imsh = plt.imshow(img, cmap = cmap)
         
-    plt.colorbar()
+    #plt.colorbar()
+    cbar = fig.colorbar(imsh, ticks = ticker.MaxNLocator(nbins=6))
+    cbar.ax.tick_params(labelsize=15) 
+    
+
+    plt.axis('off')
     
     if title:
         plt.title(title)
         
     plt.show()  
+    
+    if file:
+        plt.savefig(file, dpi=300, bbox_inches='tight')
     
 def display_mesh(stl_mesh):
     """
@@ -222,7 +231,7 @@ def display_mesh(stl_mesh):
     plt.show()
 
 
-def display_projection(data, dim = 1, bounds = None, title = None, cmap = 'gray'):
+def display_projection(data, dim = 1, bounds = None, title = None, cmap = 'gray', file = None):
     
     img = data.sum(dim)
     
@@ -237,13 +246,17 @@ def display_projection(data, dim = 1, bounds = None, title = None, cmap = 'gray'
         plt.imshow(img, cmap = cmap)
         
     plt.colorbar()
+    plt.axis('off')
     
     if title:
         plt.title(title)
     
     plt.show()
     
-def display_max_projection(data, dim = 0, title = None, cmap = 'gray'):
+    if file:
+        plt.savefig(file, dpi=300, bbox_inches='tight')
+    
+def display_max_projection(data, dim = 0, bounds = None, title = None, cmap = 'gray', file = None):
     
     img = data.max(dim)
     
@@ -252,15 +265,23 @@ def display_max_projection(data, dim = 0, title = None, cmap = 'gray'):
     
     plt.figure()
     
-    plt.imshow(img, cmap = cmap)
+    if bounds:
+        plt.imshow(img, vmin = bounds[0], vmax = bounds[1], cmap = cmap)
+    else:
+        plt.imshow(img, cmap = cmap)
+    
     plt.colorbar()
+    plt.axis('off')
     
     if title:
         plt.title(title)     
         
     plt.show()
+    
+    if file:
+        plt.savefig(file, dpi=300, bbox_inches='tight')
         
-def display_min_projection(data, dim = 0, title = None, cmap = 'gray'):
+def display_min_projection(data, dim = 0, title = None, cmap = 'gray', file = None):
     
     img = data.min(dim)
     
@@ -271,8 +292,12 @@ def display_min_projection(data, dim = 0, title = None, cmap = 'gray'):
     
     plt.imshow(img, cmap = cmap)
     plt.colorbar()
+    plt.axis('off')
     
     if title:
         plt.title(title)         
         
     plt.show()
+    
+    if file:
+        plt.savefig(file, dpi=300, bbox_inches='tight')

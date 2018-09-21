@@ -54,6 +54,14 @@ def studentst(res, deg = 1, scl = None):
     
     return grad
 
+def _sanity_check_data_(data):
+    """
+    Check if this data array is OK for ASTRA.
+    """
+    
+    if min(data.shape) == 0 | (data.dtype != 'float32') | (~numpy.isfinite(data)).any():
+        
+        raise TypeError('Data is corrupted! Data:', data)
 
 def _backproject_block_(projections, volume, proj_geom, vol_geom, algorithm = 'BP3D_CUDA', operation = '+'):
     """
@@ -62,6 +70,10 @@ def _backproject_block_(projections, volume, proj_geom, vol_geom, algorithm = 'B
     
     # Unfortunately need to hide the experimental ASTRA
     import astra.experimental as asex 
+    import traceback
+    
+    _sanity_check_data_(projections)
+    _sanity_check_data_(volume)
     
     try:
         
@@ -80,7 +92,7 @@ def _backproject_block_(projections, volume, proj_geom, vol_geom, algorithm = 'B
         vol_id = astra.data3d.link('-vol', vol_geom, volume_)    
         
         projector_id = astra.create_projector('cuda3d', proj_geom, vol_geom)
-    
+        
         if algorithm == 'BP3D_CUDA':
             asex.accumulate_BP(projector_id, vol_id, sin_id)
             
@@ -120,7 +132,9 @@ def _backproject_block_(projections, volume, proj_geom, vol_geom, algorithm = 'B
              volume /= volume_
              
     except:
-        print("ASTRA error:", sys.exc_info())
+        #print("ASTRA error:", sys.exc_info())
+        info = sys.exc_info()
+        traceback.print_exception(*info)        
         
     finally:
         astra.algorithm.delete(projector_id)
@@ -133,6 +147,10 @@ def _forwardproject_block_(projections, volume, proj_geom, vol_geom, operation =
     """           
     # Unfortunately need to hide the experimental ASTRA
     import astra.experimental as asex 
+    import traceback
+    
+    _sanity_check_data_(projections)
+    _sanity_check_data_(volume)
     
     try:
         
@@ -165,7 +183,9 @@ def _forwardproject_block_(projections, volume, proj_geom, vol_geom, operation =
             projections[:] = -projections_[:]
              
     except:
-        print("ASTRA error:", sys.exc_info())
+        #print("ASTRA error:", sys.exc_info())
+        info = sys.exc_info()
+        traceback.print_exception(*info)
         
     finally:
         astra.algorithm.delete(projector_id)
@@ -178,6 +198,7 @@ def backproject(projections, volume, geometry, algorithm = 'BP3D_CUDA', operatio
     """
     # If the data is not memmap:        
     if not isinstance(projections, numpy.memmap):    
+        print('FDK continu')
         
         projections = numpy.ascontiguousarray(projections) 
         
@@ -188,9 +209,10 @@ def backproject(projections, volume, geometry, algorithm = 'BP3D_CUDA', operatio
         _backproject_block_(projections, volume, proj_geom, vol_geom, algorithm, operation)
         
     else:
+        print('FDK blocky')
         # Decide on the size of the block:
         n = projections.shape[1]    
-        l = n // 10
+        l = n // 20
         
         # Initialize ASTRA geometries:
         vol_geom = flexData.astra_vol_geom(geometry, volume.shape)
@@ -289,14 +311,15 @@ def sample_FDK(projections, geometry, sample = [1,1,1]):
     #_backproject_block_(projections_, volume, proj_geom, vol_geom, 'FDK_CUDA')
     
     # Apply correct scaling:
-    #volume /= geometry['img_pixel']**4     
+    #volume /= geometry['img_pixel']**4    
     
-    return volume 
+    return volume
     
 def FDK(projections, volume, geometry):
     """
     FDK.
     """
+    # TODO: make JW fix normaliztion in rotated volumes.
     print('FDK reconstruction...')
     
     # Sampling:
@@ -305,10 +328,15 @@ def FDK(projections, volume, geometry):
     # Make sure array is contiguous (if not memmap):
     flexUtil.progress_bar(0)    
     
-    backproject(projections[::samp[0],::samp[1], ::samp[2]] / (numpy.prod(samp) * geometry['img_pixel'])**4, volume, geometry, 'FDK_CUDA')
+    if sum(samp) > 3:
+        backproject(projections[::samp[0],::samp[1], ::samp[2]], volume, geometry, 'FDK_CUDA')
+    else:
+        backproject(projections, volume, geometry, 'FDK_CUDA')
+    
+    volume /= (numpy.prod(samp) * geometry['img_pixel'])**4
     
     flexUtil.progress_bar(1) 
-        
+            
 def _block_index_(ii, block_number, length, mode = 'sequential'):
     """
     Create a slice for a projection block
@@ -688,6 +716,7 @@ def SIRT(projections, volume, geometry, iterations, options = {'poisson_weight':
 def FISTA(projections, volume, geometry, iterations, options = {'poisson_weight': False, 'l2_update': True, 'preview':False, 'bounds':None, 'block_number':10, 'mode':'sequential', 'ctf': None}):
     # Sampling:
     samp = geometry['proj_sample']
+    anisotropy = geometry['vol_sample']
     
     pix = (geometry['img_pixel']**4 * anisotropy[0] * anisotropy[1] * anisotropy[2] * anisotropy[2])
     prj_weight = 1 / (projections[::samp[0], ::samp[1], ::samp[2]].shape[1] * pix * max(volume.shape)) 
@@ -798,11 +827,12 @@ def PWLS_M(projections, volume, geometries, n_iter = 10, block_number = 20, stud
             vol_tmp = numpy.zeros_like(volume)
             bwp_w = numpy.zeros_like(volume)
             
-            for jj, projs in enumerate(projections):
+            for kk, projs in enumerate(projections):
+                
                 index = _block_index_(jj, block_number, projs.shape[1], 'random')
-    
+                
                 proj = numpy.ascontiguousarray(projs[:,index,:])
-                geom = geometries[jj]
+                geom = geometries[kk]
 
                 proj_geom = flexData.astra_proj_geom(geom, projs.shape, index = index) 
                 vol_geom = flexData.astra_vol_geom(geom, volume.shape) 
@@ -821,7 +851,7 @@ def PWLS_M(projections, volume, geometries, n_iter = 10, block_number = 20, stud
                 _backproject_block_(fwp_w, bwp_w, proj_geom, vol_geom, 'BP3D_CUDA', '+')
                 
                 #flex.project.backproject(fwp_w, bwp_w, geom)  
-                _forwardproject_block_(prj_tmp, volume, proj_geom, vol_geom, '+') 
+                _forwardproject_block_(prj_tmp, volume, proj_geom, vol_geom, '+')
                 #flex.project.forwardproject(prj_tmp, volume, geom)
             
                 if rings_t == 0:

@@ -17,8 +17,8 @@ proj = numpy.zeros([1, 361, 512], dtype = 'float32')
 geometry = flex.data.create_geometry(src2obj = 100, det2obj = 100, det_pixel = 0.01, theta_range = [0, 360], type = 'simple')
 
 # Create phantom and project into proj:
-vol = flex.model.phantom(vol.shape, 'bubble', [150, 15, 1.5])     
-vol = flex.compute.rotate(vol, 10, 0)
+vol = flex.model.phantom.spheroid(vol.shape, geometry, 60, 70, 100)     
+#vol = flex.compute.rotate(vol, 10, 0)
 
 flex.util.display_slice(vol)
 

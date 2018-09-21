@@ -22,16 +22,22 @@ import astra
 import transforms3d
 import transforms3d.euler
 import warnings
+import shutil
+
+import paramiko 
+import errno
+import stat
+import flexbox as flex
 
 from . import flexUtil
 
 ''' * Methods * '''
 
-GEOM_TYPE_1 = 'simple'
-GEOM_TYPE_2 = 'static_offsets'
-GEOM_TYPE_3 = 'linear_offsets'
+GEOM_SIMPLE = 'simple'
+GEOM_STATIC_OFFSETS = 'static_offsets'
+GEOM_LINEAR_OFFSETS = 'linear_offsets'
 
-def read_flexray(path, skip = 1, sample = 1, memmap = None, index = None):
+def read_flexray(path, sample = 1, skip = 1, memmap = None, index = None):
     '''
     Read raw projecitions, dark and flat-field, scan parameters from FlexRay
     
@@ -331,7 +337,7 @@ def create_geometry(src2obj, det2obj, det_pixel, theta_range = [0, 360], type = 
                 }
     
     # If type is not 'simple', populate with additional records:
-    if type == GEOM_TYPE_2:
+    if type == GEOM_STATIC_OFFSETS:
         geometry['src_vrt'] = 0.
         geometry['src_hrz'] = 0.
         geometry['src_mag'] = 0. # This value should most of the times be zero since the SOD and SDD distances are known
@@ -345,7 +351,7 @@ def create_geometry(src2obj, det2obj, det_pixel, theta_range = [0, 360], type = 
         geometry['axs_mag'] = 0. # same here
         
         
-    if type == GEOM_TYPE_3:
+    if type == GEOM_LINEAR_OFFSETS:
         zz = numpy.zeros(2, dtype = 'float')
         geometry['src_vrt'] = zz
         geometry['src_hrz'] = zz
@@ -422,7 +428,7 @@ def _flexray_log_translate_(records):
     if records is None: return None
     
     # Initialize empty meta record:
-    meta = create_meta(0, 0, 0, [0, 360], GEOM_TYPE_2)
+    meta = create_meta(0, 0, 0, [0, 360], GEOM_STATIC_OFFSETS)
     
     # Dictionary that describes the Flexray log record:        
     geom_dict =     {'img_pixel':'voxel size',
@@ -531,7 +537,7 @@ def _metadata_translate_(records):
     if records is None: return None
     
     # Initialize empty meta record:
-    meta = create_meta(0, 0, 0, [0, 360], GEOM_TYPE_2)
+    meta = create_meta(0, 0, 0, [0, 360], GEOM_STATIC_OFFSETS)
     
     # Dictionary that describes the Flexray log record:        
     geom_dict =     {'det_pixel':'detector pixel size',
@@ -620,10 +626,19 @@ def write_meta(filename, meta):
     path = os.path.dirname(filename)
     if not os.path.exists(path):
         os.makedirs(path)
+        
+    # It looks like toml doesnt like numpy arrays. Use lists.
+    # TODO: make nested:
+    for key in meta.keys():
+        if isinstance(meta[key], numpy.ndarray):
+            #meta[key] = numpy.array2string(meta[key], suppress_small=True, separator=',')
+            meta[key] = meta[key].tolist()
     
     # Save TOML to a file:
     with open(filename, 'w') as f:
-        toml.dump(meta, f)
+        d = toml.dumps(meta, True)
+        f.write(d)
+        #toml.dump(meta, f)
         
 def write_astra(filename, data_shape, meta):
     """
@@ -696,11 +711,11 @@ def ramp(array, dim, width, mode = 'linear'):
     if array.shape[dim] < (rampl + rampr):
         return array
     
-    # Index of the left ramp:
+    # Index of the left and right ramp:
     left_sl = flexUtil.anyslice(array, slice(0, rampl), dim)
     right_sl = flexUtil.anyslice(array, slice(-rampr, None), dim)
     
-    if mode == 'zero':    
+    if mode == 'zero':
         if rampl > 0:
             array[left_sl] *= 0
             
@@ -715,7 +730,7 @@ def ramp(array, dim, width, mode = 'linear'):
             
         if rampr > 0:    
             array[right_sl] *= 0
-            flexUtil.add_dim(array[right_sl], array[flexUtil.anyslice(array, -rampr, dim)])            
+            flexUtil.add_dim(array[right_sl], array[flexUtil.anyslice(array, -rampr-1, dim)])            
     
     elif mode == 'linear':
         # Set to edge and multiply by a ramp:
@@ -730,7 +745,7 @@ def ramp(array, dim, width, mode = 'linear'):
         if rampr > 0:    
             # Replace values using add_dim:
             array[right_sl] *= 0
-            flexUtil.add_dim(array[right_sl], array[flexUtil.anyslice(array, -rampr, dim)])            
+            flexUtil.add_dim(array[right_sl], array[flexUtil.anyslice(array, -rampr-1, dim)])            
 
             flexUtil.mult_dim(array[right_sl], numpy.linspace(1, 0, rampr))                    
         
@@ -943,7 +958,8 @@ def astra_vol_geom(geometry, vol_shape, slice_first = None, slice_last = None):
         shape = vol_shape
         offset = 0     
         
-    vol_geom = astra.creators.create_vol_geom(shape[1], shape[2], shape[0], 
+    #vol_geom = astra.creators.create_vol_geom(shape[1], shape[2], shape[0], 
+    vol_geom = astra.create_vol_geom(shape[1], shape[2], shape[0], 
               -size[2]/2, size[2]/2, -size[1]/2, size[1]/2, 
               -size[0]/2 + offset, size[0]/2 + offset)
         
@@ -953,10 +969,12 @@ def _modify_astra_vector_(proj_geom, geometry):
     """
     Modify ASTRA vector using known offsets from ideal circular geometry.
     """
-    if geometry.get('type') == GEOM_TYPE_1:
-        return proj_geom
+    # Even if the geometry is of the type 'simple' (GEOM_SYMPLE), we need to generate ASTRA vector to be able to rotate the reconstruction volume if needed.
+    # if geometry.get('type') == GEOM_SIMPLE:
+    #    return proj_geom
     
-    proj_geom = astra.functions.geom_2vec(proj_geom)
+    #proj_geom = astra.functions.geom_2vec(proj_geom)
+    proj_geom = astra.geom_2vec(proj_geom)
     vectors = proj_geom['Vectors']
     
     theta_count = vectors.shape[0]
@@ -965,8 +983,21 @@ def _modify_astra_vector_(proj_geom, geometry):
     # Modify vector and apply it to astra projection geometry:
     for ii in range(0, theta_count):
         
+        # Compute current offsets (for this angle):
+        if geometry.get('type') == GEOM_SIMPLE:
+            
+            det_vrt = 0 
+            det_hrz = 0
+            det_mag = 0
+            det_rot = 0
+            src_vrt = 0
+            src_hrz = 0
+            src_mag = 0
+            axs_hrz = 0
+            axs_mag = 0
+        
         # Compute current offsets:
-        if geometry.get('type') == GEOM_TYPE_2:
+        if geometry.get('type') == GEOM_STATIC_OFFSETS:
             
             det_vrt = geometry['det_vrt'] 
             det_hrz = geometry['det_hrz'] 
@@ -979,7 +1010,7 @@ def _modify_astra_vector_(proj_geom, geometry):
             axs_mag = geometry['axs_mag'] 
           
         # Use linear offsets:    
-        elif geometry.get('type') == GEOM_TYPE_3:
+        elif geometry.get('type') == GEOM_LINEAR_OFFSETS:
             b = (ii / (theta_count - 1))
             a = 1 - b
             det_vrt = geometry['det_vrt'][0] * a + geometry['det_vrt'][1] * b
@@ -1092,7 +1123,8 @@ def astra_proj_geom(geometry, data_shape, index = None):
         
         thetas = thetas[index]
        
-    proj_geom = astra.creators.create_proj_geom('cone', det_pixel[1], det_pixel[0], det_count_z, det_count_x, thetas, src2obj, det2obj)
+    #proj_geom = astra.creators.create_proj_geom('cone', det_pixel[1], det_pixel[0], det_count_z, det_count_x, thetas, src2obj, det2obj)
+    proj_geom = astra.create_proj_geom('cone', det_pixel[1], det_pixel[0], det_count_z, det_count_x, thetas, src2obj, det2obj)
     
     # Modify proj_geom if geometry is of type: static_offsets or linear_offsets:
     proj_geom = _modify_astra_vector_(proj_geom, geometry)
@@ -1104,6 +1136,30 @@ def detector_size(shape, geometry):
     Get the size of detector in mm.
     '''       
     return geometry['det_pixel'] * numpy.array(shape)
+
+def volume_bounds(proj_shape, geometry):
+    '''
+    A very simplified version of volume bounds...
+    '''
+    # TODO: Compute this propoerly.... Dont trus the horizontal bounds!!!
+    
+    # Detector bounds:
+    det_bounds = detector_bounds(proj_shape, geometry)
+    
+    # Demagnify detector bounds:
+    fact = geometry['src2obj'] / (geometry['src2obj'] + geometry['det2obj'])
+    vrt = numpy.array(det_bounds['vrt'])
+    vrt_bounds = (vrt * fact + geometry['src_vrt'] * (1 - fact))
+    
+    hrz = numpy.array(det_bounds['hrz'])
+    max_x = max(hrz - geometry['axs_hrz'])
+    
+    hrz_bounds = [geometry['vol_tra'][2] - max_x, geometry['vol_tra'][2] + max_x]
+    mag_bounds = [geometry['vol_tra'][1] - max_x, geometry['vol_tra'][1] + max_x]
+            
+    vol_bounds = {'vrt':vrt_bounds, 'mag': mag_bounds, 'hrz': hrz_bounds}
+    
+    return vol_bounds
 
 def detector_bounds(shape, geometry):
     '''
@@ -1120,7 +1176,7 @@ def detector_bounds(shape, geometry):
     bounds['hrz'] = [xmin, xmax]
     bounds['vrt'] = [ymin, ymax]
     
-    return bounds 
+    return bounds
     
 def tiles_shape(shape, geometry_list):
     """
@@ -1288,6 +1344,235 @@ def _get_files_sorted_(path, name):
 
     return files 
     
+def delete_path(path):
+    """
+    Delete everything. Remove the evidence!
+    """
+    print('Deleting:', path)
+    shutil.rmtree(path)
     
+def _connect_sftp_(hostname, username, password, log_file):
     
+    paramiko.util.log_to_file(log_file)
 
+    # Open a transport
+    transport = paramiko.Transport((hostname, 22))
+    
+    # Auth
+    print('Authorizing sftp connection...')
+    transport.connect(username = username, password = password)
+    
+    print('Done!')
+    
+    client = _MySFTPClient_.from_transport(transport)
+    
+    # Go!
+    return client 
+    
+def ssh_get_path(hostname, username, password, local_path, remote_path):
+    '''
+    Get files and directories from that path...
+    '''
+    if not os.path.exists(local_path):
+        os.mkdir(local_path)
+        print('Local directory created:', local_path)
+    
+    # Connect to remote:
+    sftp = _connect_sftp_(hostname, username, password, os.path.join(local_path, 'scp.log'))
+
+    try:
+        sftp.get_path(local_path, remote_path)            
+        
+    except:    
+        sftp.close()
+        raise Exception('SFTP connection error!')
+        
+    finally:        
+        sftp.close()
+    
+def ssh_put_path(hostname, username, password, local_path, remote_path):
+    '''
+    Put files and directories to that path...
+    '''
+    if not os.path.exists(local_path):
+        os.mkdir(local_path)
+        print('Local directory created:', local_path)
+    
+    # Connect to remote:
+    sftp = _connect_sftp_(hostname, username, password, os.path.join(local_path, 'scp.log'))
+
+    try:
+        sftp.put_path(local_path, remote_path)            
+        
+    except:    
+        sftp.close()
+        raise Exception('SFTP connection error!')
+        
+    finally:
+        sftp.close()
+    
+class _MySFTPClient_(paramiko.SFTPClient):
+    '''
+    Class needed for copying recursively through ssh (paramiko.SFTPClient only allowes to copy single files).
+    '''
+    _total_file_count_ = 0
+    _current_file_count_ = 0
+    
+    def sftp_walk(self, remote):
+        '''
+        From https://gist.github.com/johnfink8/2190472
+        '''
+        # Kindof a stripped down  version of os.walk, implemented for 
+        # sftp.  Tried running it flat without the yields, but it really
+        # chokes on big directories.
+        path=remote
+        files=[]
+        folders=[]
+        for f in self.listdir_attr(remote):
+            if stat.S_ISDIR(f.st_mode):
+                folders.append(f.filename)
+            else:
+                files.append(f.filename)
+        
+        yield path,folders,files
+        for folder in folders:
+            new_path=os.path.join(remote,folder)
+            for x in self.sftp_walk(new_path):
+                yield x
+    
+    def _put_path_(self, local, remote):
+        '''
+        Recursive function for uploading directories.
+        '''
+        if not self._exists_remote_(remote):
+            #print('*making:', remote)
+            self.mkdir(remote, ignore_existing=True)
+        
+        for item in os.listdir(local):
+            if os.path.isfile(os.path.join(local, item)):
+                
+                # Copy the file:
+                self._current_file_count_ += 1
+                
+                # We will overwrite if file is bigger:
+                #if not self._exists_remote_(os.path.join(remote, item)):
+                if self._size_local_(os.path.join(local, item)) > self._size_remote_(os.path.join(remote, item)):
+                    self.put(os.path.join(local, item), os.path.join(remote, item))
+                
+                flex.util.progress_bar(self._current_file_count_ / self._total_file_count_)
+                
+            else:
+                
+                #print('making:', os.path.join(remote, item))
+                #self.mkdir(os.path.join(remote, item), ignore_existing=True)
+                self._put_path_(os.path.join(local, item), os.path.join(remote, item))
+    
+    def put_path(self, local, remote):
+        ''' Uploads the contents of the local directory to the remote path. The
+            target directory needs to exists. All subdirectories in local are 
+            created under remote.
+        '''
+        # Count all files:
+        print('Counting files...')
+        self._total_file_count_ = 0
+        for root, subdirs, files in os.walk(local): self._total_file_count_ += len(files)
+        
+        print('Uploading %u files' % self._total_file_count_)
+        
+        # Upload files recursively:
+        self._current_file_count_= 0
+        self._put_path_(local, remote)
+
+    def _get_path_(self, local, remote):
+        """
+        Recursive get method.
+        """      
+        
+        # Create new dirs:
+        if not os.path.exists(local):
+            os.mkdir(local)
+            print('Local directory created:', local)
+        
+        # Copy files:
+        for filename in self.listdir(remote):
+
+            if stat.S_ISDIR(self.stat(os.path.join(remote, filename)).st_mode):
+                
+                # uses '/' path delimiter for remote server
+                self._get_path_(os.path.join(local, filename), os.path.join(remote, filename))
+                
+            else:
+                self._current_file_count_ += 1
+                
+                # Overwrite when bigger:
+                if self._size_local_(os.path.join(local, filename)) < self._size_remote_(os.path.join(remote, filename)):
+                #if not os.path.isfile(os.path.join(local, filename)):
+                    
+                    # Actual get has remote first:
+                    self.get(os.path.join(remote, filename), os.path.join(local, filename))
+                    
+                    
+                    flex.util.progress_bar((self._current_file_count_) / self._total_file_count_)
+                    
+    def get_path(self, local, remote):
+        '''
+        Download the content of the remote to the local path.
+        '''
+        if not self._exists_remote_(remote):
+            print('Remote path doesnt exist :(((')
+            return
+        
+        # Count all files:
+        print('Counting files...')
+        self._total_file_count_ = 0
+        for root, subdirs, files in self.sftp_walk(remote): self._total_file_count_ += len(files)
+        
+        print('Downloading %u files...' % self._total_file_count_)
+        
+        # Upload files recursively:
+        self._current_file_count_= 0
+        self._get_path_(local, remote)              
+
+    def _size_local_(self, path):
+        try:
+            sta = os.stat(path)
+            
+            return sta.st_size
+        
+        except IOError as e:
+            if e.errno == errno.ENOENT:
+                return 0
+            raise
+        
+    def _size_remote_(self, path):
+        try:
+            sta = self.stat(path)
+            
+            return sta.st_size
+        
+        except IOError as e:
+            if e.errno == errno.ENOENT:
+                return 0
+            raise
+            
+    def _exists_remote_(self, path):
+        try:
+            self.stat(path)
+        except IOError as e:
+            if e.errno == errno.ENOENT:
+                return False
+            raise
+        else:
+            return True
+        
+    
+    def mkdir(self, path, mode=511, ignore_existing=False):
+        ''' Augments mkdir by adding an option to not fail if the folder exists  '''
+        try:
+            super(_MySFTPClient_, self).mkdir(path, mode)
+            
+        except IOError:
+            if ignore_existing:
+                pass
+            else:
+                raise

@@ -10,6 +10,8 @@ setup(
     "numpy>=1.0",
     "scipy>=0.14"
     "scikit-image>=0.13.0",
+    "paramiko",
+    "scp",
     #"matplotlib>=2.0.0", # these are problematic packages somehow...
     #"transforms3d",
     #"imageio>=2.2.0",

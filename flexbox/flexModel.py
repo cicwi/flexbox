@@ -33,58 +33,55 @@ class phantom():
         return xx, yy, zz
     
     @staticmethod
-    def sphere(volume, geometry, r, offset = [0., 0., 0.]):
+    def sphere(shape, geometry, r, offset = [0., 0., 0.]):
         """
         Make sphere. Radius is in units (geometry['unit'])
         """
-        phantom.spheroid(volume, geometry, r, r, r, offset)
+        return phantom.spheroid(shape, geometry, r, r, r, offset)
         
     @staticmethod
-    def spheroid(volume, geometry, r1, r2, r3, offset = [0., 0., 0.]):
+    def spheroid(shape, geometry, r1, r2, r3, offset = [0., 0., 0.]):
         """
         Make a spheroid. 
         """
-        shape = volume.shape
-        
         # Get the coordinates in mm:
         xx,yy,zz = phantom._coords_(shape, geometry, offset)
         
         # Volume init: 
-        volume += numpy.array((((xx[:, None, None]/r1)**2 + (yy[None, :, None]/r2)**2 + (zz[None, None, :]/r3)**2) < 1), dtype = 'float32') 
+        return  numpy.array((((xx[:, None, None]/r1)**2 + (yy[None, :, None]/r2)**2 + (zz[None, None, :]/r3)**2) < 1), dtype = 'float32') 
         
     @staticmethod
-    def cuboid(volume, geometry, a, b, c, offset = [0., 0., 0.]):
+    def cuboid(shape, geometry, a, b, c, offset = [0., 0., 0.]):
         """
         Make a cuboid. Dimensions are in units (geometry['unit'])
         """
-        shape = volume.shape
-        
         # Get the coordinates in mm:
         xx,yy,zz = phantom._coords_(shape, geometry, offset)
          
-        volume += numpy.array((abs(xx[:, None, None]) < a) * (abs(yy[None, :, None]) < b) * (abs(zz[None, None, :]) < c), dtype = 'float32')  
+        return  numpy.array((abs(xx[:, None, None]) < a / 2) * (abs(yy[None, :, None]) < b / 2) * (abs(zz[None, None, :]) < c / 2), dtype = 'float32')  
         
     @staticmethod        
-    def cylinder(volume, geometry, r, h, offset = [0., 0., 0.]):
+    def cylinder(shape, geometry, r, h, offset = [0., 0., 0.]):
         """
         Make a cylinder with a specified radius and height.
         """
         
-        shape = volume.shape
+        volume = numpy.zeros(shape, dtype = 'float32')
         
         # Get the coordinates in mm:
         xx,yy,zz = phantom._coords_(shape, geometry, offset)
          
-        volume += numpy.array(((zz[None, None, :])**2 + (yy[None, :, None])**2) < r, dtype = 'float32')         
-        volume *= (numpy.abs(xx[:, None, None]) < h)
+        volume = numpy.array(((zz[None, None, :])**2 + (yy[None, :, None])**2) < r ** 2, dtype = 'float32')  
+        
+        return (numpy.abs(xx) < h / 2)[:, None, None] * volume
 
     @staticmethod        
-    def checkers(volume, geometry, frequency, offset = [0., 0., 0.]):
+    def checkers(shape, geometry, frequency, offset = [0., 0., 0.]):
         """
         Make a 3D checkers board.
         """
         
-        shape = volume.shape
+        volume = numpy.zeros(shape, dtype = 'float32')
         
         # Get the coordinates in mm:
         xx,yy,zz = phantom._coords_(shape, geometry, offset)
@@ -106,6 +103,8 @@ class phantom():
             volume_[:, :, sl] = ~volume_[:, :, sl]
  
         volume *= volume_
+        
+        return volume
                 
 def get_ctf(shape, mode = 'gaussian', parameter = 1):
     """

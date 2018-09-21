@@ -128,7 +128,7 @@ class Action:
     """
     A batch job operation applied to a nuber of datasets.
     """                
-    def __init__(self, name, callback, type = _ACTION_BATCH_, *arguments):
+    def __init__(self, name, callback, type = _ACTION_BATCH_, arguments = []):
         
         self.name = name
         self.callback = callback
@@ -147,7 +147,7 @@ class Pipe:
     _ignore_warnings_ = True
     _history_ = {}
     
-    def __init__(self, pipe = None):
+    def __init__(self, memmap_path = '', hostname ='', pas = '', usr = '', pipe = None):
         """
         Initialize the Pipe!
         """
@@ -168,6 +168,12 @@ class Pipe:
 
         # Memmaps - need to delete them at the end:
         self._memmaps_ = []    
+        self._memmap_path_ = memmap_path
+        
+        # SSH info:
+        self._hostname_ = hostname
+        self._pas_ = pas
+        self._usr_ = usr
 
         # If pipe is provided - copy it's action que!
         if pipe:
@@ -182,12 +188,20 @@ class Pipe:
     def template(self, pipe):
         """
         Copy the pipe action que to a new pipe
-        """
-                
+        """        
+        # Copy ssh info and memmap folder::
+        self._hostname_ = pipe._hostname_
+        self._pas_ = pipe._pas_
+        self._usr_ = pipe._usr_
+        
+        self._memmap_path_ = pipe._memmap_path_
+        
+        # Recreate action que:
         for action in pipe._action_que_:
-            # Actions need to be connected to this pipe's callbacks!
-            callback = self._callback_dictionary_.get(action.name)
+            # Here we shouldnt copy the action callback as it carries a link to another pipe:
+            callback = getattr(self, action.callback.__name__)
             
+            # Create an action and add to this pipe:
             myaction = Action(action.name, callback, action.type, action.arguments)
             self._action_que_.append(myaction)
                 
@@ -223,6 +237,8 @@ class Pipe:
         """
         Flush the data.
         """
+        # TODO: test flushing and restarting the pipe.
+        
         # Flush connected pipes:
         for pipe in self._connections_:
             pipe.flush()
@@ -270,23 +286,45 @@ class Pipe:
             block.schedule(act.name, act.arguments)
                         
         self._data_que_.append(block)
-
-    def add_data(self, path):
+        
+    def pull_data(self, local_path, remote_path, hostname, username, password = None):
+        """
+        Pull all data from the host.
+        """
+        flexData.ssh_get_path(hostname, username, password, local_path, remote_path)  
+        
+    def push_data(self, local_path, remote_path, hostname, username, password = None, cleanup = False):
+        """
+        Push all data to the host.
+        """
+        flexData.ssh_put_path(hostname, username, password, local_path, remote_path)  
+        
+        if cleanup:
+            flexData.delete_path(local_path)
+    
+    def add_data(self, local_path):
         """
         Add a block of data to the pipe. 
         """
         import glob
         
-        if not '*' in path:
+        print('Adding: ', local_path)
+        
+        if not '*' in local_path:
 
             # Add a block with the given path                        
-            self._add_block_(Block(path))
+            self._add_block_(Block(local_path))
             
         else:
             # Expand and loop:
-            folders = glob.glob(path)
+            folders = glob.glob(local_path)
+            
+            if len(folders) == 0:
+                raise ValueError('No data found at the specified path: ' + local_path)
+            
             for path_ in folders:
-                 self._add_block_(Block(path_))  
+                if os.path.isdir(path_):
+                    self._add_block_(Block(path_))  
                  
             print('Created %u data blocks.' % len(folders))     
                             
@@ -317,7 +355,7 @@ class Pipe:
         for data in self._data_que_:
             for act in self._action_que_:
                 data.schedule(act.name, act.arguments)
-                        
+   
     def run(self):
         """
         Run me! Each dataset is picked from _data_que_ array and trickled down the pipe.
@@ -345,6 +383,8 @@ class Pipe:
                     
                 self._block_ = self._pick_data_()
                 
+                print(' ')
+                
                 # Push the bastard down the pipe!
                 for action in self._action_que_:
                     
@@ -358,7 +398,7 @@ class Pipe:
                         
                             # Apply action:
                             action.count += 1
-                            print('Executing concurrent: ' + action.name)
+                            print('*Executing concurrent action: ' + action.name)
                             
                             # On/Off warnings
                             if self._ignore_warnings_:
@@ -385,9 +425,15 @@ class Pipe:
                             # if all data is on standby:
                             if self._is_standby_(): 
                                 self._block_.status = _STATUS_PENDING_
+                                
+                            print('*Executing group action: ' + action.name)
+                            
+                        else:
+                            print('*Executing batch action: ' + action.name)
                         
                         # Action counter increase:
                         action.count += 1
+                        
                                       
                         #print('*** Block ***')
                         #print(block.data)
@@ -398,7 +444,7 @@ class Pipe:
                         else:
                             warnings.filterwarnings("default")
                             
-                        # Apply action                   
+                        # Apply action  
                         action.callback(self._block_, action.count, action.arguments)
                         
                         # Collect garbage:
@@ -488,7 +534,7 @@ class Pipe:
         # Add counter to the name to make it unique:
         name = '[%u]'%len(self._action_que_) + name
         
-        action = Action(name, callback, act_type, *args)
+        action = Action(name, callback, act_type, args)
         
         self._action_que_.append(action)
 
@@ -546,24 +592,15 @@ class Pipe:
     '''
     >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Here is the description of actions >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     '''           
-        
-    def _scan_flexray_(self, data, count, argument):
+    def _arg_(self, args, index):
         """
-        Fake operation for scanning data.
+        A little function that returns either the list element or None without raising an out of bounds error.
         """
-        
-        print('Scanning data. Output at:', argument[0])
-        
-        self._record_history_('Data scanned.', argument)
-        pass   
-
-    def scan_flexray(self, folder):
-        """
-        Fake operation for scanning data.
-        """
-        
-        self._add_action_('scan_flexray', self._scan_flexray_, _ACTION_BATCH_, folder)
-    
+        if len(args) > index:
+            return args[index]
+        else:
+            return None
+            
     def _read_all_meta_(self, data, count, argument):
         """
         Read all meta!
@@ -572,13 +609,20 @@ class Pipe:
                 
         for data in self._data_que_:
             path = data.path
-            samp = argument[0]
+            samp = self._arg_(argument, 0)
          
-            if argument[1]:
+            if self._arg_(argument, 1):
                 data.meta = flexData.read_meta(os.path.join(path, 'meta.toml'))
                 
             else:
-                meta = flexData.read_log(path, 'flexray', sample = samp)
+                
+                if os.path.exists(os.path.join(path, 'metadata.toml')):
+                    
+                    meta = flexData.read_log(path, 'metadata', sample = samp)   
+                    
+                else:
+                    meta = flexData.read_log(path, 'flexray', sample = samp)
+                    
                 data.meta = meta
     
     def read_all_meta(self, sampling = 1, volume = False):
@@ -593,16 +637,23 @@ class Pipe:
         """
         path = data.path
         
-        samp = argument[0]
-        memmap = argument[1]
+        samp = self._arg_(argument, 0)
+        memmap = self._arg_(argument, 1)
         
         if memmap:
-            self._memmaps_.append(os.path.join(memmap, 'volume'))
+            if not self._memmap_path_:
+                raise Exception('memmap_path is not initialized in pipe!')
+            
+            memmap_file = os.path.join(self._memmap_path_, 'volume')
+            self._memmaps_.append(memmap_file)
+            
+        else:
+            memmap_file = None
         
         if not samp: samp = 1
         
         # Read volume:
-        data.data = flexData.read_raw(path, 'vol', skip = samp, sample = [samp, samp], memmap = memmap)  
+        data.data = flexData.read_raw(path, 'vol', skip = samp, sample = [samp, samp], memmap = memmap_file)  
         
         data.meta = flexData.read_meta(os.path.join(path, 'meta.toml')) 
         
@@ -610,7 +661,7 @@ class Pipe:
         
         self._record_history_('Volume loaded.', [])
         
-    def read_volume(self, sampling = 1, memmap = None):
+    def read_volume(self, sampling = 1, memmap = False):
         """
         Load the volume stack.
         """
@@ -625,42 +676,59 @@ class Pipe:
         # Read:    
         path = data.path
         
-        samp = argument[0]
-        skip = argument[1]
-        memmap = argument[2]
+        samp = self._arg_(argument, 0)
+        skip = self._arg_(argument, 1)
+        memmap = self._arg_(argument, 2)
         
         # Keep track of memmaps:            
         if memmap:
-            self._memmaps_.append(memmap)
-
+            if not self._memmap_path_:
+                raise Exception('memmap_path is not initialized in pipe!')
+            
+            memmap_file = os.path.join(self._memmap_path_, 'projections')
+            self._memmaps_.append(memmap_file)
+            
+        else:
+            memmap_file = None
+            
         # Read and process:
-        proj, meta = flexCompute.process_flex(path, samp, skip, memmap) 
+        proj, meta = flexCompute.process_flex(path, samp, skip, memmap_file) 
                     
         data.data = proj
         data.meta = meta
         
         data.type = 'projections'
         
+        print('Data in the pipe with shape', data.data.shape)
+        
         gc.collect()
         
-    def process_flex(self, sampling = 1, skip = 1, memmap = None):
+        self._record_history_('Standard FlexRay processing. [samp, skip]', argument[0:2])
+        
+    def process_flex(self, sampling = 1, skip = 1, memmap = False):
         """
         Read and process FlexRay data.
         """
         self._add_action_('process_flex', self._process_flex_, _ACTION_BATCH_, sampling, skip, memmap)
         
-        self._record_history_('Standard FlexRay processing.', [])
-    
     def _bh_correction_(self, data, count, argument):
         """
         Correct for beam hardening.
         """
-        path = [0]
-        compound = [1]
-        density = [2]
+        path = self._arg_(argument, 0)
+        compound = self._arg_(argument, 1)
+        density = self._arg_(argument, 2)
         
-        energy, spectrum = numpy.loadtxt(path + 'spectrum.txt')
-        data.data = flexCompute.equivalent_density(data.data, data.meta['geometry'], energy, spectrum, compound = compound, density = density)
+        #energy, spectrum = numpy.loadtxt(os.path.join(data.path, path, 'spectrum.txt'))
+        # Use toml files:
+        file = os.path.join(data.path, path, 'spectrum.toml')
+        if os.path.exists(file):
+            spec = flexData.read_meta(file)
+            
+        else:
+            raise Exception('File not found:' + file)
+        
+        data.data = flexCompute.equivalent_density(data.data, data.meta, spec['energy'], spec['spectrum'], compound = compound, density = density)
         
         self._record_history_('Beam-hardening correction. [compound, density]', [compound, density])
     
@@ -680,11 +748,11 @@ class Pipe:
         """
         #from stl import mesh
         
-        file = argument[0]
-        preview = argument[1]
+        file = self._arg_(argument, 0)
+        preview = self._arg_(argument, 1)
         
         # Generate STL:
-        stl_mesh = flexCompute.generate_stl(data.data)
+        stl_mesh = flexCompute.generate_stl(data.data, data.geometry)
         
         # Save file:
         ffile = os.path.join(data.path, file)
@@ -707,6 +775,10 @@ class Pipe:
         Merge datasets one by one. Datasets with the same source coordinates will be merged.
         arguments: geoms, sampling, memmap
         """
+        
+        if len(self._data_que_) == 0:
+            raise Exception('The data que is empty! It has to be initialized before merge_detectors by read_all_meta')
+        
         # First call creates a buffer:
         if count == 1:    
         
@@ -729,24 +801,25 @@ class Pipe:
                 else:
                     index = src_pos.index(src)    
                     geoms_list[index].append(data_.geometry)
-            
+                
             # Check if memmap is provided:
-            memmap = argument[0]
+            memmap = self._arg_(argument, 0)
             
             self._buffer_['src'] = []
             self._buffer_['tot_geom'] = []
             self._buffer_['tot_data'] = []
             
-            print('Found %u groups of datasets.' % len(src_pos))
-            
-            # Compute total geometries for eah of the groups:                    
+            # Compute total geometries for each of the groups:                                
             for ii, geoms in enumerate(geoms_list):
                 tot_shape, tot_geom = flexData.tiles_shape(data.data.shape, geoms)  
                     
                 # Create memmaps:
                 if memmap: 
                     
-                    file = os.path.join(memmap, 'detector%u' % ii)
+                    if not self._memmap_path_:
+                        raise Exception('memmap_path is not initialized in pipe!')
+                    
+                    file = os.path.join(self._memmap_path_, 'detector%u' % ii)
                                         
                     self._memmaps_.append(file)
                     total = numpy.memmap(file, dtype='float32', mode='w+', shape = (tot_shape[0],tot_shape[1],tot_shape[2]))       
@@ -799,13 +872,26 @@ class Pipe:
            # Clear buffer:
            #self.flush_buffer()
            
-    def merge_detectors(self, memmap = None):
+    def merge_detectors(self, memmap = False):
         """
         Merge detectors into a single image. Will produce a separate datablock for each source position. 
         memmap : path to the scratch file.
         """
         self._add_action_('merge_detectors', self._merge_detectors_, _ACTION_STANDBY_, memmap)
-                              
+        
+    def _find_intersection_(self, interval_a, interval_b):
+        """
+        Utility that computes intesection between two interwals:
+        """
+        
+        if ( (interval_a[0] > interval_b[1]) | (interval_a[1] < interval_b[0]) ):
+            return 0
+        else:
+            a = max(interval_a[0], interval_b[0])
+            b = min(interval_a[1], interval_b[1])
+            
+            return b - a
+                                      
     def _merge_volume_(self, data, count, argument):
         """
         Merge volume datasets one by one. 
@@ -840,10 +926,10 @@ class Pipe:
             tot_shape[0] +=  offset + 1
                     
             # Initialize total:
-            memmap = argument[0]
+            memmap = self._arg_(argument,0)
             
             if memmap: 
-                file = os.path.join(memmap, 'volume')
+                file = os.path.join(self._memmap_path_, 'volume')
                 
                 self._memmaps_.append(file)
                 total = numpy.memmap(file, dtype=data.data.dtype, mode='w+', shape = (tot_shape[0],tot_shape[1],tot_shape[2]))       
@@ -851,16 +937,21 @@ class Pipe:
             else:
                 total = numpy.zeros(tot_shape, dtype=data.data.dtype)     
                 
-            self._buffer_['total'] = total    
+            self._buffer_['total'] = total
             
-            # Compute overlap:
-            b0 = flexData.detector_bounds(data.data.shape, self._data_que_[0].meta['geometry'])
-            b1 = flexData.detector_bounds(data.data.shape, self._data_que_[1].meta['geometry'])
+            # Find two datasets that have biggest overlap and assume it's the same for every adjuscent dataset:           
+            b0 = flexData.volume_bounds(data.data.shape, self._data_que_[0].meta['geometry'])
             
-            overlap = min(abs(b0['vrt'][1] - b1['vrt'][0]), abs(b0['vrt'][0] - b1['vrt'][1]))
-            
+            overlap = 0            
+            for ii in range(1, len(self._data_que_)):
+                
+                b1 = flexData.volume_bounds(data.data.shape, self._data_que_[ii].meta['geometry'])
+                
+                new_overlap = self._find_intersection_(b0['vrt'], b1['vrt'])                
+                overlap = max(overlap, new_overlap)
+
             # This is in volume (img_pixel):
-            overlap = int(overlap / data.geometry['det_pixel'] / 2)
+            overlap = int(overlap / data.geometry['img_pixel'])
             
             self._buffer_['overlap'] = overlap
             
@@ -880,13 +971,18 @@ class Pipe:
         # Crop data based on the size of the overlap:
         ramp = data.data.shape[0] // 10
         
-        dif = int(overlap /2 - ramp)- 1 # to be safe....
+        dif = int(overlap / 2 - ramp) # to be safe....
         
         if dif > 0:
             
             print('Ramp of %u pixels is applied in volume merge. Will crop %u pixels before merge to reduce the risk of artifacts.' % (ramp, dif))
             
             data.data = data.data[dif:-dif,:,:]
+            
+        else:
+            ramp = int(overlap / 2)
+            
+        print('New data shape is', data.data.shape)            
                     
         # Merge volumes with some ramp:
         index = numpy.arange(0, data.data.shape[0]) + offset
@@ -948,12 +1044,13 @@ class Pipe:
     def _fdk_(self, data, count, argument):        
 
         shape = data.data.shape
+        #safety = data.data.shape[0] // 10
         vol = numpy.zeros([shape[0], shape[2], shape[2]], dtype = 'float32')
         
         flexProject.FDK(data.data, vol, data.meta['geometry'])
         
-        em = argument[0]
-        sirt = argument[1]
+        em = self._arg_(argument,0)
+        sirt = self._arg_(argument,1)
         
         if em:
             flexProject.EM(data.data, vol, data.meta['geometry'], iterations = em, options = {'block_number':20})
@@ -981,9 +1078,9 @@ class Pipe:
         shape = data.data.shape
         vol = numpy.zeros([shape[0]+10, shape[2], shape[2]], dtype = 'float32')
         
-        iterations = argument[0]
-        block_number = argument[1]
-        mode = argument[2]
+        iterations = self._arg_(argument, 0)
+        block_number = self._arg_(argument, 1)
+        mode = self._arg_(argument, 2)
         
         options = {'bounds':[0, 2], 'l2_update':False, 'block_number':block_number, 'mode':mode}
                 
@@ -1027,9 +1124,9 @@ class Pipe:
         shape = data.data.shape
         vol = numpy.zeros([shape[0]+10, shape[2], shape[2]], dtype = 'float32')
         
-        iterations = argument[0]
-        block_number = argument[1]
-        mode = argument[2]
+        iterations = self._arg_(argument, 0)
+        block_number = self._arg_(argument, 1)
+        mode = self._arg_(argument, 2)
         
         flexProject.EM(data.data, vol, data.meta['geometry'], iterations = iterations, options = {'bounds': [0, 2], 'block_number':block_number, 'mode':mode})
         
@@ -1050,20 +1147,25 @@ class Pipe:
         
     def _ramp_(self, data, count, argument):
         
-        width = argument[0]
-        dim = argument[1]
+        width = self._arg_(argument, 0)
+        dim = self._arg_(argument, 1)
+        mode = self._arg_(argument, 2)
         
-        data.data = flexData.pad(data.data, dim, width, mode = 'linear')
+        if (dim == 2) & (not numpy.isscalar(width)):
+            offset = (width[1] - width[0]) / 2
+            data.meta['geometry']['det_hrz'] += offset * data.meta['geometry']['det_pixel']
+        
+        data.data = flexData.pad(data.data, dim, width, mode)
         
         self._record_history_('Ramp applied. [dim, width]', [dim, width])
         
         #data.data = flexUtil.apply_edge_ramp(data.data, width, extend)
     
-    def ramp(self, width, dim):
+    def ramp(self, width, dim, mode = 'linear'):
         """
         Apply pad and ramp to one of the dimensions.
         """
-        self._add_action_('ramp', self._ramp_, _ACTION_BATCH_, width, dim)
+        self._add_action_('ramp', self._ramp_, _ACTION_BATCH_, width, dim, mode)
                         
     def _shape_(self, data, count, argument):
         """
@@ -1071,7 +1173,7 @@ class Pipe:
         """
         print('Applying shape...')
         
-        shape = argument[0]
+        shape = self._arg_(argument, 0)
                 
         myshape = data.data.shape
         if (myshape != shape):
@@ -1102,7 +1204,7 @@ class Pipe:
         """
         print('Applying binning...')
         
-        dim = argument[0]
+        dim = self._arg_(argument, 0)
         
         data.data = flexData.bin(data.data, dim)
         
@@ -1120,18 +1222,18 @@ class Pipe:
         """
         print('Applying crop...')
         
-        dim = argument[0]
-        width = argument[1]
+        dim = self._arg_(argument, 0)
+        width = self._arg_(argument, 1)
          
         data.data = flexData.crop(data.data, dim, width)
         
         self._record_history_('Crop applied. [dim, width]', [dim, width])
 
-    def crop(self):
+    def crop(self, dim, width):
         """
         Crop the data.
         """
-        self._add_action_('crop', self._crop_, _ACTION_BATCH_)        
+        self._add_action_('crop', self._crop_, _ACTION_BATCH_, dim, width)        
 
     def _auto_crop_(self, data, count, argument):
         """
@@ -1155,8 +1257,7 @@ class Pipe:
         """
         Normalize the data using markers.
         """
-        
-        normalization_value = argument[0]
+        normalization_value = self._arg_(argument, 0)
     
         # Find the marker:
         a,b,c = flexCompute.find_marker(data.data, data.meta)    
@@ -1180,8 +1281,8 @@ class Pipe:
         """
         Cast data to type.
         """                
-        dtype = argument[0]
-        bounds = argument[1]
+        dtype = self._arg_(argument, 0)
+        bounds = self._arg_(argument, 1)
         
         if dtype  is None:
             dtype = 'float16'
@@ -1203,9 +1304,9 @@ class Pipe:
         """
         Display some data.
         """        
-        dim = argument[0]
-        display_type = argument[1]
-        print_geom = argument[2]
+        dim = self._arg_(argument, 0)
+        display_type = self._arg_(argument, 1)
+        print_geom = self._arg_(argument, 2)
         
         if dim is None: 
             dim = 1
@@ -1213,6 +1314,9 @@ class Pipe:
         # DIsplay single dimension:
         if display_type == 'projection':
             flexUtil.display_projection(data.data, dim = dim, title = 'Projection. Block #%u'%count)
+                                        
+        elif display_type == 'max_projection':
+            flexUtil.display_max_projection(data.data, dim = dim, title = 'Max projection. Block #%u'%count)    
                                         
         elif display_type == 'slice':
             flexUtil.display_slice(data.data, dim = dim, title = 'Mid slice. Block #%u'%count)    
@@ -1233,17 +1337,17 @@ class Pipe:
         """
         
         print('Mapping data to disk...')
+                    
+        if not self._memmap_path_:
+            raise Exception('memmap_path is not initialized in pipe!')
         
-        path = argument[0]
-        
-        # Map to file:
-        file = os.path.join(path, 'block_%u'%count)
-        
+        memmap_file = os.path.join(self._memmap_path_, 'block_%u'%count)
+        self._memmaps_.append(memmap_file)
+                        
         shape = data.data.shape
         dtype = data.data.dtype
         
-        self._memmaps_.append(file)
-        memmap = numpy.memmap(file, dtype=dtype, mode='w+', shape = (shape[0], shape[1], shape[2]))       
+        memmap = numpy.memmap(memmap_file, dtype=dtype, mode='w+', shape = (shape[0], shape[1], shape[2]))       
         
         memmap[:] = data.data[:]
         data.data = memmap
@@ -1262,11 +1366,11 @@ class Pipe:
         Write the raw and meta files to disk.
         """
         
-        folder = argument[0]
-        name = argument[1]
-        dim = argument[2]
-        skip = argument[3]
-        compress = argument[4]
+        folder = self._arg_(argument, 0)
+        name = self._arg_(argument, 1)
+        dim = self._arg_(argument, 2)
+        skip = self._arg_(argument, 3)
+        compress = self._arg_(argument, 4)
         
         self._record_history_('Saved to disk. [shape, dtype, zlib compression]', [data.data.shape, data.data.dtype, compress])
         
@@ -1300,8 +1404,8 @@ class Pipe:
         """
         Shift the data by a fixed amount.
         """
-        dim = argument[0]
-        shift = argument[1]
+        dim = self._arg_(argument, 0)
+        shift = self._arg_(argument, 1)
         
         data.data = flexCompute.translate(data.data, shift = shift, axis = dim)
         
@@ -1321,7 +1425,7 @@ class Pipe:
         print('Volume registration in progress...')
         
         # Condition of registering to the last dataset:
-        last = argument[0]
+        last = self._arg_(argument, 0)
         
         # Compute the histogram of the first dataset:
         if count == 1:
@@ -1393,7 +1497,7 @@ class Pipe:
 
     def _soft_threshold_(self, data, count, argument):
         
-        flexCompute.soft_threshold(data.data, argument[0], argument[1])
+        flexCompute.soft_threshold(data.data, self._arg_(argument, 0), self._arg_(argument,1))
         
         self._record_history_('Threshold applied. [mode, constant]', argument)
 
@@ -1403,7 +1507,7 @@ class Pipe:
         """
         
         self._add_action_('soft_threshold', self._soft_threshold_, _ACTION_BATCH_, mode, threshold)    
-                 
+                         
     def _equalize_resolution_(self, data, count, argument):
         """
         Scale all datasets to the same pixle size. 

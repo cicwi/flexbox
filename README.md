@@ -19,6 +19,8 @@ If you want to use pip and setuptools (setup.py), first install all of the depen
 
 > conda install -c owlas transforms3d
 
+> conda install paramiko
+
 > git clone https://github.com/cicwi/flexbox
 > cd flexbox
 
