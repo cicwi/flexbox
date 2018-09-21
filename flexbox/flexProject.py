@@ -293,7 +293,6 @@ def sample_FDK(projections, geometry, sample = [1,1,1]):
     # Standard volume:
     
     # Adapt the geometry to the subsampling level:
-    volume = init_volume(projections, geometry)
     
     # Change sampling:
 
@@ -303,9 +302,11 @@ def sample_FDK(projections, geometry, sample = [1,1,1]):
     geometry_ = geometry.copy()
 
     # Apply subsampling to detector and volume:    
-    geometry_['anisotrpy'] = [sample[0], sample[1], sample[2]]
-    geometry_['sample'] = sample
-
+    geometry_['vol_sample'] = [sample[0], sample[1], sample[2]]
+    geometry_['proj_sample'] = [sample[0], sample[2], sample[2]]
+    
+    volume = init_volume(projections, geometry_)
+    
     FDK(projections, volume, geometry_)
     
     #_backproject_block_(projections_, volume, proj_geom, vol_geom, 'FDK_CUDA')
@@ -320,23 +321,22 @@ def FDK(projections, volume, geometry):
     FDK.
     """
     # TODO: make JW fix normaliztion in rotated volumes.
-    print('FDK reconstruction...')
-    
     # Sampling:
     samp = geometry['proj_sample']
     
     # Make sure array is contiguous (if not memmap):
-    flexUtil.progress_bar(0)    
-    
     if sum(samp) > 3:
         backproject(projections[::samp[0],::samp[1], ::samp[2]], volume, geometry, 'FDK_CUDA')
     else:
+        print('FDK reconstruction...')
+        flexUtil.progress_bar(0)
+        
         backproject(projections, volume, geometry, 'FDK_CUDA')
+        
+        flexUtil.progress_bar(1) 
     
     #volume /= (numpy.prod(samp) * geometry['img_pixel'])**4
-    
-    flexUtil.progress_bar(1) 
-            
+        
 def _block_index_(ii, block_number, length, mode = 'sequential'):
     """
     Create a slice for a projection block

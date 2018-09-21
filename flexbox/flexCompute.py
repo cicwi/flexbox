@@ -76,6 +76,20 @@ def bounding_box(data):
     rows = numpy.any(integral, axis=1)
     a = numpy.where(rows)[0][[0, -1]]
     
+    # Add a safe margin:
+    a_int = (a[1] - a[0]) // 20
+    b_int = (b[1] - b[0]) // 20
+    c_int = (c[1] - c[0]) // 20
+    
+    a[0] = max(0, a[0] - a_int)
+    a[1] = min(data.shape[0], a[1] + a_int)
+    
+    b[0] = max(0, b[0] - b_int)
+    b[1] = min(data.shape[1], b[1] + b_int)
+    
+    c[0] = max(0, c[0] - c_int)
+    c[1] = min(data.shape[2], c[1] + c_int)
+    
     return a, b, c
 
 def soft_threshold(data, mode = 'histogram', threshold = 0):
@@ -1030,7 +1044,7 @@ def _modifier_l2cost_(projections, geometry, subsample, value, key = 'axs_hrz', 
             
     return -l2    
     
-def _optimize_modifier_subsample_(values, projections, geometry, samp = [1, 1], key = 'axs_hrz', display = True):  
+def _optimize_modifier_subsample_(values, projections, geometry, samp = [1, 1, 1], key = 'axs_hrz', display = True):  
     '''
     Optimize a modifier using a particular sampling of the projection data.
     '''  
@@ -1041,11 +1055,15 @@ def _optimize_modifier_subsample_(values, projections, geometry, samp = [1, 1], 
     
     print('Starting a full search from: %0.3f mm' % values.min(), 'to %0.3f mm'% values.max())
     
+    flexUtil.progress_bar(0) 
+    
     ii = 0
     for val in values:
+        
         func_values[ii] = _modifier_l2cost_(projections, geometry, samp, val, 'axs_hrz', display)
-
+        
         ii += 1          
+        flexUtil.progress_bar(ii / len(values)) 
     
     min_index = func_values.argmin()    
     

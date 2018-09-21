@@ -863,7 +863,7 @@ class Pipe:
         self._buffer_['tot_data'][index] = total   
     
         # Display:
-        flexUtil.display_slice(total, dim = 1,title = 'total to buffer')  
+        #flexUtil.display_slice(total, dim = 1,title = 'total to buffer')  
         
         if data.status == _STATUS_STANDBY_:
            pass 
@@ -1118,19 +1118,22 @@ class Pipe:
         """
         Find the rotation axis:
         """
+        
+        subscale = self._arg_(argument, 0)
+        
         print('Optimization of the rotation axis...')
-        guess = flexCompute.optimize_rotation_center(data.data, data.meta['geometry'], centre_of_mass = False, subscale = 2)
+        guess = flexCompute.optimize_rotation_center(data.data, data.meta['geometry'], centre_of_mass = False, subscale = subscale)
         
         print('Old value:%0.3f' % data.meta['geometry']['axs_hrz'], 'new value: %0.3f' % guess)
         data.meta['geometry']['axs_hrz'] = guess
         
         self._record_history_('Rotation axis optimized. [offset in mm]', guess)
 
-    def find_rotation(self):
+    def find_rotation(self, subscale = 2):
         """
         Find the rotation center.
         """
-        self._add_action_('find_rotation', self._find_rotation_, _ACTION_BATCH_)
+        self._add_action_('find_rotation', self._find_rotation_, _ACTION_BATCH_, subscale)
         
     def _em_(self, data, count, argument):        
         
@@ -1254,7 +1257,8 @@ class Pipe:
         """
         print('Applying automatic crop...')
         
-        a,b,c = flexCompute.bounding_box(data.data)                 
+        a,b,c = flexCompute.bounding_box(data.data)
+        
         data.data = data.data[a[0]:a[1], b[0]:b[1], c[0]:c[1]]
         
         self._record_history_('Auto-crop applied. [bounding box]', [a,b,c])
