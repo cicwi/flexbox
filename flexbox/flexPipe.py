@@ -1283,6 +1283,9 @@ class Pipe:
     
         print('Marker density is: %2.2f' % rho)
         
+        if rho < 0.1:
+            raise ValueError('Suspicious marker density: %0.2f. Will not apply correction!' % rho)
+        
         data.data *= (normalization_value / rho)
         
         self._record_history_('Marker based normalization. [old, new]', [rho, normalization_value])

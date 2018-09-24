@@ -26,7 +26,7 @@ def generate_stl(data, geometry):
     from stl import mesh
 
     # Segment the volume:
-    threshold = binary_threshold(data, mode = 'otsu')
+    threshold = data > binary_threshold(data, mode = 'otsu')
     
     # Close small holes:
     print('Filling small holes...')
@@ -48,11 +48,13 @@ def bounding_box(data):
     """
     Find a bounding box for the volume (use for auto_crop).
     """
-    data = data.copy()
+    # Avoid memory overflow!
+    #data = data.copy()
+    data2 = data[::2, ::2, ::2]
     
-    soft_threshold(data, mode = 'otsu')
+    soft_threshold(data2, mode = 'otsu')
 
-    integral = numpy.float32(data).sum(0)
+    integral = numpy.float32(data2).sum(0)
     
     # Filter noise:
     integral = ndimage.gaussian_filter(integral, 10)
@@ -65,7 +67,7 @@ def bounding_box(data):
     b = numpy.where(rows)[0][[0, -1]]
     c = numpy.where(cols)[0][[0, -1]]
     
-    integral = numpy.float32(data).sum(1)
+    integral = numpy.float32(data2).sum(1)
         
     # Filter noise:
     integral = ndimage.gaussian_filter(integral, 10)
@@ -81,14 +83,14 @@ def bounding_box(data):
     b_int = (b[1] - b[0]) // 20
     c_int = (c[1] - c[0]) // 20
     
-    a[0] = max(0, a[0] - a_int)
-    a[1] = min(data.shape[0], a[1] + a_int)
+    a[0] = max(0, a[0] - a_int) * 2
+    a[1] = min(data2.shape[0], a[1] + a_int) * 2
     
-    b[0] = max(0, b[0] - b_int)
-    b[1] = min(data.shape[1], b[1] + b_int)
+    b[0] = max(0, b[0] - b_int) * 2
+    b[1] = min(data2.shape[1], b[1] + b_int) * 2
     
-    c[0] = max(0, c[0] - c_int)
-    c[1] = min(data.shape[2], c[1] + c_int)
+    c[0] = max(0, c[0] - c_int) * 2
+    c[1] = min(data2.shape[2], c[1] + c_int) * 2
     
     return a, b, c
 
@@ -99,13 +101,19 @@ def soft_threshold(data, mode = 'histogram', threshold = 0):
         mode (str)       : 'histogram', 'otsu' or 'constant'
         threshold (float): threshold value if mode = 'constant'
     """
+    # Avoiding memory overflow:
+    thresh = binary_threshold(data, mode, threshold)
     
-    data[~binary_threshold(data, mode, threshold)] = 0
+    for ii in range(data.shape[0]):
+        
+        img = data[ii, :, :]
+        img[img < thresh] = 0
+        
+        data[ii, :, :] = img
     
 def binary_threshold(data, mode = 'histogram', threshold = 0):
     '''
-    Compute binary mask that is True when values are above threshold. 
-    Use 'histogram, 'otsu', or 'constant' mode.
+    Compute binary threshold. Use 'histogram, 'otsu', or 'constant' mode.
     '''
     
     import matplotlib.pyplot as plt
@@ -122,6 +130,10 @@ def binary_threshold(data, mode = 'histogram', threshold = 0):
         # Make sure there are no 0s:
         y = numpy.log(y + 1)    
         y = ndimage.filters.gaussian_filter1d(y, sigma=1)
+        
+        plt.figure()
+        plt.plot(x, y)
+        plt.show()
     
         # Find air maximum:
         air_index = numpy.argmax(y)
@@ -139,8 +151,6 @@ def binary_threshold(data, mode = 'histogram', threshold = 0):
         ind = signal.argrelextrema(yd, numpy.less)[0][0]
         min_ind = signal.argrelextrema(y, numpy.less)[0][0]
     
-        plt.figure()
-        plt.plot(x, y)
         plt.plot(x[ind], y[ind], '+')
         plt.plot(x[min_ind], y[min_ind], '*')
         plt.show()
@@ -163,7 +173,7 @@ def binary_threshold(data, mode = 'histogram', threshold = 0):
     
     print('Threshold value is %0.3f' % threshold)
     
-    return data > threshold
+    return threshold
     
 def _find_best_flip_(fixed, moving, Rfix, Tfix, Rmov, Tmov, use_CG = True, sample = 2):
     """
@@ -231,15 +241,19 @@ def find_marker(data, meta, r = 5):
     """
     Find a marker in 3D volume by applying a circular kernel with inner radius r [mm].
     """
+    # TODO: it fail sometimes when the marker is adjuscent to something...
     
     #data = data.copy()
-    
+    # First subsample data to avoid memory overflow:
+    data2 = data[::2, ::2, ::2]
+        
     # Get areas with significant density:
-    threshold = numpy.float32(binary_threshold(data, mode = 'otsu'))
+    t = binary_threshold(data2, mode = 'otsu')
+    threshold = numpy.float32(data2 > t)
     
-    # Create a circular kernel:
-    kernel = -0.5 * flexModel.phantom.sphere(data.shape, meta['geometry'], r * 2, [0,0,0])
-    kernel += flexModel.phantom.sphere(data.shape, meta['geometry'], r, [0,0,0])
+    # Create a circular kernel (take into account subsampling of data2):
+    kernel = -0.5 * flexModel.phantom.sphere(data2.shape, meta['geometry'], r, [0,0,0])
+    kernel += flexModel.phantom.sphere(data2.shape, meta['geometry'], r / 2, [0,0,0])
 
     kernel[kernel > 0] *= ((r * 2)**3 - r**3) / r**3
     
@@ -252,8 +266,8 @@ def find_marker(data, meta, r = 5):
     print('Estimating local variance...')
     
     # Now estimate the local variance:
-    B = ndimage.filters.laplace(data) ** 2    
-    B /= data    
+    B = ndimage.filters.laplace(data2) ** 2    
+    B /= data2
     
     # Make sure that boundaries don't affect variance estimation:
     threshold = threshold == 0
@@ -267,6 +281,9 @@ def find_marker(data, meta, r = 5):
     # Compute final weight:    
     A -= B
     
+    # Make it dependent on absolote intensity: (could be dependent on distance from some value....)
+    A *= data2
+    
     print('A.max', A.max())
     
     print('A.mean', A[A > 0].mean())
@@ -278,6 +295,11 @@ def find_marker(data, meta, r = 5):
     
     # Coordinates:
     a, b, c = numpy.unravel_index(index, A.shape)
+    
+    # Upsample:
+    a *= 2
+    b *= 2
+    c *= 2
     
     print('Found the marker at:', a, b, c)
     
@@ -1439,9 +1461,12 @@ def calibrate_spectrum(projections, volume, meta, compound = 'Al', density = 2.7
 
     # Find the shape of the object:                                                    
     if threshold:
-        segmentation = numpy.float32(binary_threshold(volume, mode = 'constant', threshold = threshold))
+        t = binary_threshold(volume, mode = 'constant', threshold = threshold)
+        
+        segmentation = numpy.float32()
     else:
-        segmentation = numpy.float32(binary_threshold(volume, mode = 'otsu'))
+        t = binary_threshold(volume, mode = 'otsu')
+        segmentation = numpy.float32(volume > t)
         
     # Crop:    
     #height = segmentation.shape[0]   
