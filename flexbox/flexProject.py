@@ -206,16 +206,20 @@ def backproject(projections, volume, geometry, algorithm = 'BP3D_CUDA', operatio
         vol_geom = flexData.astra_vol_geom(geometry, volume.shape)
         proj_geom = flexData.astra_proj_geom(geometry, projections.shape)    
         
+        flexUtil.progress_bar(0)
         _backproject_block_(projections, volume, proj_geom, vol_geom, algorithm, operation)
+        flexUtil.progress_bar(1)
         
     else:
         #print('FDK blocky')
         # Decide on the size of the block:
         n = projections.shape[1]    
-        l = n // 20
+        l = n // 10
         
         # Initialize ASTRA geometries:
         vol_geom = flexData.astra_vol_geom(geometry, volume.shape)
+        
+        flexUtil.progress_bar(0)
         
         # Loop over blocks:
         for ii in range(n // l):
@@ -230,6 +234,11 @@ def backproject(projections, volume, geometry, algorithm = 'BP3D_CUDA', operatio
             
             # Backproject:    
             _backproject_block_(block, volume, proj_geom, vol_geom, algorithm, operation)  
+            
+            flexUtil.progress_bar((ii) / (n//l - 1))
+            
+        # Normalize:    
+        volume /= 10
             
 def forwardproject(projections, volume, geometry, operation = '+'):
     """
@@ -329,11 +338,11 @@ def FDK(projections, volume, geometry):
         backproject(projections[::samp[0],::samp[1], ::samp[2]], volume, geometry, 'FDK_CUDA')
     else:
         print('FDK reconstruction...')
-        flexUtil.progress_bar(0)
+        #flexUtil.progress_bar(0)
         
         backproject(projections, volume, geometry, 'FDK_CUDA')
         
-        flexUtil.progress_bar(1) 
+        #flexUtil.progress_bar(1) 
     
     #volume /= (numpy.prod(samp) * geometry['img_pixel'])**4
         

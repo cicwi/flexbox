@@ -690,7 +690,27 @@ def shape_alike(vol1, vol2):
         if pp < 0:
             vol2 = pad(vol2, dim, -pp, symmetric = True, mode = 'linear')
         
-    return vol1, vol2    
+    return vol1, vol2  
+
+def rewrite_memmap(old_array, new_array):
+    '''
+    Reshaping memmaps is tough. We will recreate one instead hoping that this will not overflow our RAM...
+    THis is a dirty qick fix! Try to use resize instead!
+    '''
+    
+    if isinstance(old_array, numpy.memmap):
+        #del old_array
+        
+        old_array =  numpy.memmap(old_array.filename, dtype='float32', mode = 'r+', shape = new_array.shape)
+        old_array[:] = new_array[:]
+        
+    else:
+        del old_array
+        
+        # array is not a memmmap:
+        old_array = new_array
+        
+    return old_array  
 
 def ramp(array, dim, width, mode = 'linear'):
     """
@@ -783,7 +803,9 @@ def pad(array, dim, width, mode = 'edge'):
     
     new[sl] = array
     
-    return ramp(new, dim, width, mode)
+    new = ramp(new, dim, width, mode)
+    
+    return rewrite_memmap(array, new)# ramp(new, dim, width, mode)
  
 def bin(array, dim = None):
     """
@@ -834,7 +856,7 @@ def bin(array, dim = None):
         
         return array[:-1:2, :-1:2, :-1:2]
     
-def crop(array, dim, width, symmetric = False, geometry = None):
+def crop(array, dim, width, geometry = None):
     """
     Crop an array along the given dimension.
     """
@@ -843,28 +865,33 @@ def crop(array, dim, width, symmetric = False, geometry = None):
         widthr = int(width[1])
         
     else:
-        if symmetric:
-            widthl = int(width) // 2
-            widthr = int(width) - widthl 
-        else:
-            widthl = 0
-            widthr = int(width)
+        widthl = int(width) // 2
+        widthr = int(width) - widthl 
    
     # Geometry shifts:
     h = 0
     v = 0
-        
+    
+    # If widthr we need to sample up to None index according to Python rules
+    widthr = -widthr
+    
     if dim == 0:
-        v = (widthl - widthr)
-        array = array[widthl:-widthr, :,:]
+        v = (widthl + widthr)
+        
+        if widthr == 0: widthr = None
+        array = array[widthl:widthr, :,:]
         
     elif dim == 1:
-        h = (widthl - widthr)
-        array = array[:,widthl:-widthr,:]
+        h = (widthl + widthr)
+        
+        if widthr == 0: widthr = None
+        array = array[:,widthl:widthr,:]
         
     elif dim == 2:
-        h = (widthl - widthr)
-        array = array[:,:,widthl:-widthr]   
+        h = (widthl + widthr)
+        
+        if widthr == 0: widthr = None
+        array = array[:,:,widthl:widthr]   
     
     if geometry: shift_geometry(geometry, h/2, v/2)
     #if geometry: shift_geometry(geometry, -h/2, -v/2)
@@ -997,7 +1024,7 @@ def _modify_astra_vector_(proj_geom, geometry):
             axs_mag = 0
         
         # Compute current offsets:
-        if geometry.get('type') == GEOM_STATIC_OFFSETS:
+        elif geometry.get('type') == GEOM_STATIC_OFFSETS:
             
             det_vrt = geometry['det_vrt'] 
             det_hrz = geometry['det_hrz'] 

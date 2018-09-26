@@ -50,7 +50,7 @@ def bounding_box(data):
     """
     # Avoid memory overflow!
     #data = data.copy()
-    data2 = data[::2, ::2, ::2]
+    data2 = data[::2, ::2, ::2].copy()
     
     soft_threshold(data2, mode = 'otsu')
 
@@ -83,14 +83,21 @@ def bounding_box(data):
     b_int = (b[1] - b[0]) // 20
     c_int = (c[1] - c[0]) // 20
     
-    a[0] = max(0, a[0] - a_int) * 2
-    a[1] = min(data2.shape[0], a[1] + a_int) * 2
+    a[0] = a[0] - a_int
+    a[1] = a[1] + a_int
+    b[0] = b[0] - b_int
+    b[1] = b[1] + b_int
+    c[0] = c[0] - c_int
+    c[1] = c[1] + c_int
     
-    b[0] = max(0, b[0] - b_int) * 2
-    b[1] = min(data2.shape[1], b[1] + b_int) * 2
+    a[0] = max(0, a[0] * 2)
+    a[1] = min(data.shape[0], a[1] * 2)
     
-    c[0] = max(0, c[0] - c_int) * 2
-    c[1] = min(data2.shape[2], c[1] + c_int) * 2
+    b[0] = max(0, b[0] * 2)
+    b[1] = min(data.shape[1], b[1] * 2)
+    
+    c[0] = max(0, c[0] * 2)
+    c[1] = min(data.shape[2], c[1] * 2)
     
     return a, b, c
 
@@ -245,7 +252,7 @@ def find_marker(data, meta, r = 5):
     
     #data = data.copy()
     # First subsample data to avoid memory overflow:
-    data2 = data[::2, ::2, ::2]
+    data2 = data[::2, ::2, ::2].copy()
         
     # Get areas with significant density:
     t = binary_threshold(data2, mode = 'otsu')

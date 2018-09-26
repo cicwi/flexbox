@@ -11,8 +11,9 @@ import numpy
 geometry = flex.data.create_geometry(src2obj = 100, det2obj = 100, det_pixel = 0.2, theta_range = [0, 360])
 
 #%% Short version:
-vol = flex.model.phantom([1, 128, 128], 'box', [25,25,35])   
-    
+vol = flex.model.phantom.cuboid([1,128,128], geometry, 5,5,5)  
+flex.util.display_slice(vol , title = 'Phantom') 
+
 # Spectrum:    
 E, S = flex.model.effective_spectrum(kv = 90)  
 flex.util.plot(E,S, title ='Spectrum')   
@@ -39,8 +40,13 @@ flex.util.plot(vol_rec[0, 64])
 #%% Beam hardening correction: 
 
 proj = -numpy.log(counts)
-energy, spectrum = flex.compute.calibrate_spectrum(proj, vol_rec, geometry, compound = 'Al', density = 2.7, n_bin = 50)   
-proj = flex.compute.equivalent_density(proj, geometry, energy, spectrum, compound = 'Al', density = 2.7) 
+#energy, spectrum = flex.compute.calibrate_spectrum(proj, vol_rec, geometry, compound = 'Al', density = 2.7, n_bin = 50)   
+#proj = flex.compute.equivalent_density(proj, geometry, energy, spectrum, compound = 'Al', density = 2.7) 
+
+meta = {'geometry':geometry, 'settings':{'voltage':90}}
+
+energy, spectrum = flex.compute.calibrate_spectrum(proj, vol_rec, meta, compound = 'Al', density = 2.7, n_bin = 50)   
+proj = flex.compute.equivalent_density(proj, meta, energy, spectrum, compound = 'Al', density = 2.7) 
 
 flex.project.FDK(proj, vol_rec, geometry)
 flex.util.display_slice(vol_rec, title = 'Corrected FDK')

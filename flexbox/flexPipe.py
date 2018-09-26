@@ -229,6 +229,7 @@ class Pipe:
         Remove memmaps.
         """
         for memmap in self._memmaps_:
+            print('Removing memmap:', memmap)
             if os.path.isfile(memmap): os.remove(memmap)
             
         self._memmaps_ = []
@@ -387,6 +388,9 @@ class Pipe:
                 
                 # Push the bastard down the pipe!
                 for action in self._action_que_:
+                    
+                    print('Data type:')
+                    print(type(self._block_.data))
                     
                     # If this block was put on standby - stop and go to the next one.
                     if (self._block_.status == _ACTION_STANDBY_): 
@@ -1259,8 +1263,16 @@ class Pipe:
         
         a,b,c = flexCompute.bounding_box(data.data)
         
-        data.data = data.data[a[0]:a[1], b[0]:b[1], c[0]:c[1]]
+        # memmap friendly crop:
+        sz = data.data.shape
         
+        print('Bounding box found:', [a,b,c])
+        print('Old dimensions are:', sz)
+        
+        data.data = flexData.crop(data.data, 0, [a[0], sz[0] - a[1]])
+        data.data = flexData.crop(data.data, 1, [b[0], sz[1] - b[1]])
+        data.data = flexData.crop(data.data, 2, [c[0], sz[2] - c[1]])
+                
         self._record_history_('Auto-crop applied. [bounding box]', [a,b,c])
         
     def auto_crop(self):
@@ -1530,7 +1542,22 @@ class Pipe:
         """
         
         self._add_action_('soft_threshold', self._soft_threshold_, _ACTION_BATCH_, mode, threshold)    
-                         
+
+    
+    def _histogram_(self, data, count, argument):
+        """
+        Compute and display histogram ...
+        """
+        
+        log = self._arg_(argument, 0)
+        
+        flexCompute.histogram(data.data[::2,::2,::2], log = log)
+       
+    def histogram(self, log = False):
+        """
+        Compute and display histogram ...
+        """
+                 
     def _equalize_resolution_(self, data, count, argument):
         """
         Scale all datasets to the same pixle size. 
@@ -1588,11 +1615,11 @@ class Pipe:
                 crop = shp_max[dim] - myshape[dim]
                 if crop < 0:
                     # Crop case:
-                    data.data = flexUtil.crop(data.data, dim, -crop, symmetric = True)
+                    data.data = flexData.crop(data.data, dim, crop)
             
                 elif crop > 0:
                     # Pad case:
-                    data.data = flexUtil.pad(data.data, dim, crop, symmetric = True)
+                    data.data = flexData.pad(data.data, dim, crop)
             
         # Report:
         mass = numpy.sum(data.data > 0) / numpy.prod(data.data.shape)    
@@ -1604,6 +1631,8 @@ class Pipe:
             del self._buffer_['shp_max']
             
         self._record_history_('Resolution equalization applied.')
+        
+        
             
     def equalize_resolution(self):
         """
